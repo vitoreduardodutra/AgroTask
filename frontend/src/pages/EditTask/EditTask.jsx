@@ -1,6 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import api from '../../services/api';
+import api, { isRequestOfflineError } from '../../services/api';
+import {
+  enqueueTaskStatusUpdate,
+  getPendingTaskStatusCount,
+  processPendingTaskStatusQueue,
+  updateTaskStatusInOfflineCaches,
+} from '../../services/offlineTaskStatusQueue';
 import backIcon from '../../assets/icons/Voltar.svg';
 import saveChangesIcon from '../../assets/icons/SalvarAlterações.svg';
 import AppShell from '../../components/AppShell/AppShell';
@@ -20,6 +26,13 @@ function EditTask() {
   const [savingTask, setSavingTask] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [isOffline, setIsOffline] = useState(
+    typeof navigator !== 'undefined' ? !navigator.onLine : false
+  );
+  const [pendingStatusCount, setPendingStatusCount] = useState(
+    getPendingTaskStatusCount()
+  );
+  const [syncingPendingQueue, setSyncingPendingQueue] = useState(false);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -30,6 +43,18 @@ function EditTask() {
     priority: 'MEDIUM',
     status: 'PENDING',
   });
+
+  const pendingQueueText = useMemo(() => {
+    if (pendingStatusCount === 0) {
+      return '';
+    }
+
+    if (pendingStatusCount === 1) {
+      return 'Existe 1 atualização de status pendente de sincronização.';
+    }
+
+    return `Existem ${pendingStatusCount} atualizações de status pendentes de sincronização.`;
+  }, [pendingStatusCount]);
 
   const handleLogout = () => {
     localStorage.removeItem('agrotask_token');
@@ -61,6 +86,44 @@ function EditTask() {
     const adjustedDate = new Date(date.getTime() - offset * 60000);
 
     return adjustedDate.toISOString().slice(0, 16);
+  };
+
+  const syncPendingQueue = async () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setPendingStatusCount(getPendingTaskStatusCount());
+      return;
+    }
+
+    try {
+      setSyncingPendingQueue(true);
+
+      const result = await processPendingTaskStatusQueue(api);
+
+      setPendingStatusCount(getPendingTaskStatusCount());
+
+      if (result.synced > 0) {
+        setSuccessMessage((currentMessage) => {
+          if (currentMessage) {
+            return currentMessage;
+          }
+
+          if (result.synced === 1) {
+            return '1 atualização offline foi sincronizada com sucesso.';
+          }
+
+          return `${result.synced} atualizações offline foram sincronizadas com sucesso.`;
+        });
+      }
+    } catch (error) {
+      const status = error.response?.status;
+
+      if (status === 401) {
+        handleLogout();
+        return;
+      }
+    } finally {
+      setSyncingPendingQueue(false);
+    }
   };
 
   useEffect(() => {
@@ -100,7 +163,13 @@ function EditTask() {
           return;
         }
 
-        setErrorMessage(message);
+        if (isRequestOfflineError(error)) {
+          setErrorMessage(
+            'Você está offline. A edição completa da tarefa exige conexão. Para funcionários, o salvamento offline do status continua disponível se a página já estiver carregada.'
+          );
+        } else {
+          setErrorMessage(message);
+        }
       } finally {
         setLoadingPage(false);
       }
@@ -108,6 +177,30 @@ function EditTask() {
 
     loadPageData();
   }, [id, isAdmin]);
+
+  useEffect(() => {
+    setPendingStatusCount(getPendingTaskStatusCount());
+
+    const handleOnline = async () => {
+      setIsOffline(false);
+      await syncPendingQueue();
+    };
+
+    const handleOffline = () => {
+      setIsOffline(true);
+      setPendingStatusCount(getPendingTaskStatusCount());
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    syncPendingQueue();
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -150,6 +243,32 @@ function EditTask() {
         return;
       }
 
+      if (!isAdmin && isRequestOfflineError(error)) {
+        enqueueTaskStatusUpdate({
+          taskId: id,
+          status: formData.status,
+        });
+
+        updateTaskStatusInOfflineCaches(id, formData.status);
+        setPendingStatusCount(getPendingTaskStatusCount());
+        setSuccessMessage(
+          'Você está offline. O novo status foi salvo localmente e será sincronizado automaticamente quando a conexão voltar.'
+        );
+
+        setTimeout(() => {
+          navigate(`/task-details/${id}`, { replace: true });
+        }, 1000);
+
+        return;
+      }
+
+      if (isAdmin && isRequestOfflineError(error)) {
+        setErrorMessage(
+          'Você está offline. A edição completa da tarefa exige conexão com a internet.'
+        );
+        return;
+      }
+
       setErrorMessage(message);
     } finally {
       setSavingTask(false);
@@ -173,6 +292,28 @@ function EditTask() {
                 : 'Como funcionário, você pode alterar apenas o status da tarefa'}
             </p>
           </div>
+
+          <div className={`edit-task-connection-banner ${isOffline ? 'offline' : 'online'}`}>
+            <span className="edit-task-connection-dot" />
+            <div className="edit-task-connection-text">
+              <strong>{isOffline ? 'Modo offline' : 'Online'}</strong>
+              <span>
+                {isOffline
+                  ? isAdmin
+                    ? 'Sem conexão com a internet. A edição completa da tarefa está indisponível offline.'
+                    : 'Sem conexão com a internet. Você ainda pode salvar o status, e a sincronização acontecerá quando a conexão voltar.'
+                  : syncingPendingQueue
+                  ? 'Conexão ativa. Verificando sincronização de status pendentes...'
+                  : 'Conexão ativa. As alterações são enviadas normalmente e os status pendentes podem ser sincronizados.'}
+              </span>
+            </div>
+          </div>
+
+          {pendingStatusCount > 0 && (
+            <div className="edit-task-feedback offline-queue">
+              {pendingQueueText}
+            </div>
+          )}
 
           {errorMessage && (
             <div className="edit-task-feedback error">{errorMessage}</div>

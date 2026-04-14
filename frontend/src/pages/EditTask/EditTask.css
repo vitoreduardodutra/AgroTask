@@ -347,6 +347,58 @@
   color: #98a2b3;
 }
 
+.edit-task-connection-banner {
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid #d8e4ef;
+  background: #f8fbff;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.edit-task-connection-banner.online {
+  border-color: #ccebd6;
+  background: #f3fcf6;
+}
+
+.edit-task-connection-banner.offline {
+  border-color: #fde7b5;
+  background: #fff9eb;
+}
+
+.edit-task-connection-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex-shrink: 0;
+}
+
+.edit-task-connection-banner.offline .edit-task-connection-dot {
+  background: #f59e0b;
+}
+
+.edit-task-connection-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.edit-task-connection-text strong {
+  font-size: 0.95rem;
+  color: #111827;
+  font-weight: 700;
+}
+
+.edit-task-connection-text span {
+  font-size: 0.93rem;
+  color: #667085;
+  line-height: 1.5;
+}
+
 .edit-task-feedback {
   margin-bottom: 20px;
   padding: 14px 16px;
@@ -367,6 +419,12 @@
 }
 
 .edit-task-feedback.info {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+}
+
+.edit-task-feedback.offline-queue {
   background: #eff6ff;
   border: 1px solid #bfdbfe;
   color: #1d4ed8;
@@ -762,7 +820,8 @@
     font-size: 1.5rem;
   }
 
-  .edit-task-page-header p {
+  .edit-task-page-header p,
+  .edit-task-connection-text span {
     font-size: 0.9rem;
   }
 
@@ -816,6 +875,10 @@
   .edit-task-save-icon {
     width: 17px;
     height: 17px;
+  }
+
+  .edit-task-connection-banner {
+    padding: 13px 14px;
   }
 }
 

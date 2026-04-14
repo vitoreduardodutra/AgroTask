@@ -337,6 +337,58 @@
   flex-shrink: 0;
 }
 
+.tasks-connection-banner {
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid #d8e4ef;
+  background: #f8fbff;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.tasks-connection-banner.online {
+  border-color: #ccebd6;
+  background: #f3fcf6;
+}
+
+.tasks-connection-banner.offline {
+  border-color: #fde7b5;
+  background: #fff9eb;
+}
+
+.tasks-connection-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex-shrink: 0;
+}
+
+.tasks-connection-banner.offline .tasks-connection-dot {
+  background: #f59e0b;
+}
+
+.tasks-connection-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tasks-connection-text strong {
+  font-size: 0.95rem;
+  color: #111827;
+  font-weight: 700;
+}
+
+.tasks-connection-text span {
+  font-size: 0.93rem;
+  color: #667085;
+  line-height: 1.5;
+}
+
 .tasks-filters-card,
 .tasks-table-card {
   background: #ffffff;
@@ -501,6 +553,13 @@
   color: #166534;
 }
 
+.tasks-feedback.offline-cache,
+.tasks-feedback.offline-queue {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+}
+
 .tasks-table-card {
   overflow: hidden;
 }
@@ -660,6 +719,27 @@
   border-radius: 50%;
   background: currentColor;
   opacity: 0.75;
+}
+
+.tasks-status-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.tasks-pending-sync-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #fff7e6;
+  border: 1px solid #f5d08a;
+  color: #b7791f;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .tasks-deadline {
@@ -945,7 +1025,8 @@
   .tasks-responsible-cell span,
   .tasks-deadline,
   .tasks-table-footer,
-  .tasks-empty-message {
+  .tasks-empty-message,
+  .tasks-connection-text span {
     font-size: 0.9rem;
   }
 
@@ -971,5 +1052,9 @@
   .tasks-modal-actions {
     padding-left: 16px;
     padding-right: 16px;
+  }
+
+  .tasks-connection-banner {
+    padding: 13px 14px;
   }
 }

@@ -1,5 +1,16 @@
 import axios from 'axios';
 
+export function isRequestOfflineError(error) {
+  const status = error.response?.status;
+
+  return !error.response && (
+    error.code === 'ERR_NETWORK' ||
+    error.code === 'ECONNABORTED' ||
+    navigator.onLine === false ||
+    status === 0
+  );
+}
+
 const api = axios.create({
   baseURL: 'http://localhost:3001',
   timeout: 10000,

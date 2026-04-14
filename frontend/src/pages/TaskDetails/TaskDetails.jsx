@@ -1,6 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import api from '../../services/api';
+import api, { isRequestOfflineError } from '../../services/api';
+import {
+  getTaskDetailsCache,
+  saveTaskDetailsCache,
+  formatTaskDetailsCacheDateTime,
+} from '../../services/offlineTaskDetails';
+import {
+  getPendingTaskStatusCount,
+  processPendingTaskStatusQueue,
+} from '../../services/offlineTaskStatusQueue';
 import backIcon from '../../assets/icons/Voltar.svg';
 import responsibleIcon from '../../assets/icons/Responsável.svg';
 import deadlineIcon from '../../assets/icons/Prazo.svg';
@@ -28,10 +37,45 @@ function TaskDetails() {
   const [previewEvidence, setPreviewEvidence] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [downloadingEvidenceId, setDownloadingEvidenceId] = useState(null);
+  const [isOffline, setIsOffline] = useState(
+    typeof navigator !== 'undefined' ? !navigator.onLine : false
+  );
+  const [showOfflineCacheMessage, setShowOfflineCacheMessage] = useState(false);
+  const [offlineCacheTimestamp, setOfflineCacheTimestamp] = useState('');
+  const [pendingStatusCount, setPendingStatusCount] = useState(
+    getPendingTaskStatusCount()
+  );
+  const [syncingPendingQueue, setSyncingPendingQueue] = useState(false);
 
   const apiBaseUrl = useMemo(() => {
     return (api.defaults.baseURL || '').replace(/\/$/, '');
   }, []);
+
+  const offlineCacheText = useMemo(() => {
+    if (!offlineCacheTimestamp) {
+      return '';
+    }
+
+    const formattedDate = formatTaskDetailsCacheDateTime(offlineCacheTimestamp);
+
+    if (!formattedDate) {
+      return '';
+    }
+
+    return `Última atualização local em ${formattedDate}.`;
+  }, [offlineCacheTimestamp]);
+
+  const pendingQueueText = useMemo(() => {
+    if (pendingStatusCount === 0) {
+      return '';
+    }
+
+    if (pendingStatusCount === 1) {
+      return 'Existe 1 atualização de status pendente de sincronização.';
+    }
+
+    return `Existem ${pendingStatusCount} atualizações de status pendentes de sincronização.`;
+  }, [pendingStatusCount]);
 
   const handleLogout = () => {
     localStorage.removeItem('agrotask_token');
@@ -82,8 +126,48 @@ function TaskDetails() {
     setPreviewLoading(false);
   };
 
+  const syncPendingQueue = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setPendingStatusCount(getPendingTaskStatusCount());
+      return;
+    }
+
+    try {
+      setSyncingPendingQueue(true);
+
+      const result = await processPendingTaskStatusQueue(api);
+
+      setPendingStatusCount(getPendingTaskStatusCount());
+
+      if (result.synced > 0) {
+        setSuccessFeedbackMessage(
+          result.synced === 1
+            ? '1 atualização pendente foi sincronizada com sucesso.'
+            : `${result.synced} atualizações pendentes foram sincronizadas com sucesso.`
+        );
+      }
+    } catch (error) {
+      const status = error.response?.status;
+
+      if (status === 401) {
+        handleLogout();
+      }
+    } finally {
+      setSyncingPendingQueue(false);
+    }
+  }, [navigate]);
+
+  const [successFeedbackMessage, setSuccessFeedbackMessage] = useState('');
+
   const openEvidencePreview = async (evidence) => {
     if (!evidence) {
+      return;
+    }
+
+    if (isOffline) {
+      setErrorMessage(
+        'Você está offline. A visualização detalhada da evidência precisa de conexão com a internet.'
+      );
       return;
     }
 
@@ -133,7 +217,13 @@ function TaskDetails() {
         };
       });
     } catch (error) {
-      setErrorMessage('Não foi possível carregar a visualização da evidência.');
+      if (isRequestOfflineError(error)) {
+        setErrorMessage(
+          'Você está offline. A visualização detalhada da evidência precisa de conexão com a internet.'
+        );
+      } else {
+        setErrorMessage('Não foi possível carregar a visualização da evidência.');
+      }
     } finally {
       setPreviewLoading(false);
     }
@@ -142,6 +232,13 @@ function TaskDetails() {
   const handleDownloadEvidence = async (event, evidence) => {
     event.preventDefault();
     event.stopPropagation();
+
+    if (isOffline) {
+      setErrorMessage(
+        'Você está offline. Conecte-se à internet para baixar a evidência.'
+      );
+      return;
+    }
 
     try {
       setDownloadingEvidenceId(evidence.id);
@@ -166,40 +263,77 @@ function TaskDetails() {
 
       window.URL.revokeObjectURL(blobUrl);
     } catch (error) {
-      setErrorMessage('Não foi possível baixar a evidência.');
+      if (isRequestOfflineError(error)) {
+        setErrorMessage(
+          'Você está offline. Conecte-se à internet para baixar a evidência.'
+        );
+      } else {
+        setErrorMessage('Não foi possível baixar a evidência.');
+      }
     } finally {
       setDownloadingEvidenceId(null);
     }
   };
 
-  useEffect(() => {
-    async function loadTaskDetails() {
-      try {
-        setLoading(true);
-        setErrorMessage('');
+  const loadTaskDetails = useCallback(async () => {
+    try {
+      setLoading(true);
+      setErrorMessage('');
+      setShowOfflineCacheMessage(false);
+      setOfflineCacheTimestamp('');
 
-        const response = await api.get(`/tasks/${id}`);
+      const response = await api.get(`/tasks/${id}`);
+      const responseTask = response.data.task || null;
 
-        setTask(response.data.task || null);
-      } catch (error) {
-        const status = error.response?.status;
-        const message =
-          error.response?.data?.message ||
-          'Não foi possível carregar os detalhes da tarefa.';
+      setTask(responseTask);
 
-        if (status === 401) {
-          handleLogout();
-          return;
+      if (responseTask) {
+        saveTaskDetailsCache(id, responseTask);
+      }
+
+      setPendingStatusCount(getPendingTaskStatusCount());
+    } catch (error) {
+      const status = error.response?.status;
+
+      if (status === 401) {
+        handleLogout();
+        return;
+      }
+
+      if (isRequestOfflineError(error)) {
+        const cachedData = getTaskDetailsCache(id);
+
+        if (cachedData?.task) {
+          setTask(cachedData.task);
+          setShowOfflineCacheMessage(true);
+          setOfflineCacheTimestamp(cachedData.cachedAt || '');
+          setErrorMessage('');
+        } else {
+          setTask(null);
+          setShowOfflineCacheMessage(false);
+          setOfflineCacheTimestamp('');
+          setErrorMessage(
+            'Você está sem internet e não há detalhes salvos em cache para esta tarefa.'
+          );
         }
 
-        setErrorMessage(message);
-      } finally {
-        setLoading(false);
+        setPendingStatusCount(getPendingTaskStatusCount());
+        return;
       }
-    }
 
+      const message =
+        error.response?.data?.message ||
+        'Não foi possível carregar os detalhes da tarefa.';
+
+      setErrorMessage(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [id, navigate]);
+
+  useEffect(() => {
     loadTaskDetails();
-  }, [id]);
+  }, [loadTaskDetails]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -218,6 +352,29 @@ function TaskDetails() {
       document.body.style.overflow = '';
     };
   }, [previewEvidence]);
+
+  useEffect(() => {
+    const handleOnline = async () => {
+      setIsOffline(false);
+      await syncPendingQueue();
+      await loadTaskDetails();
+    };
+
+    const handleOffline = () => {
+      setIsOffline(true);
+      setPendingStatusCount(getPendingTaskStatusCount());
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    syncPendingQueue();
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [loadTaskDetails, syncPendingQueue]);
 
   useEffect(() => {
     return () => {
@@ -262,6 +419,43 @@ function TaskDetails() {
             </div>
           </div>
 
+          <div
+            className={`task-details-connection-banner ${
+              isOffline ? 'offline' : 'online'
+            }`}
+          >
+            <span className="task-details-connection-dot" />
+            <div className="task-details-connection-text">
+              <strong>{isOffline ? 'Modo offline' : 'Online'}</strong>
+              <span>
+                {isOffline
+                  ? 'Sem conexão com a internet. O sistema tentará usar os detalhes salvos neste dispositivo.'
+                  : syncingPendingQueue
+                  ? 'Conexão ativa. Sincronizando alterações pendentes de status...'
+                  : 'Conexão ativa. Os detalhes da tarefa são carregados normalmente e salvos localmente.'}
+              </span>
+            </div>
+          </div>
+
+          {pendingStatusCount > 0 && (
+            <div className="task-details-feedback offline-queue">
+              {pendingQueueText}
+            </div>
+          )}
+
+          {showOfflineCacheMessage && (
+            <div className="task-details-feedback offline-cache">
+              Exibindo detalhes salvos localmente para esta tarefa.{' '}
+              {offlineCacheText}
+            </div>
+          )}
+
+          {successFeedbackMessage && (
+            <div className="task-details-feedback success">
+              {successFeedbackMessage}
+            </div>
+          )}
+
           {errorMessage && (
             <div className="task-details-feedback error">{errorMessage}</div>
           )}
@@ -296,6 +490,12 @@ function TaskDetails() {
                     )}
                     <span>{task.priority}</span>
                   </span>
+
+                  {task.hasOfflinePendingStatus && (
+                    <span className="task-details-pending-sync-tag">
+                      Status pendente de sincronização
+                    </span>
+                  )}
                 </div>
 
                 <h2 className="task-details-title">{task.title}</h2>

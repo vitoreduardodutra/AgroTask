@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import api from '../../services/api';
+import api, { isRequestOfflineError } from '../../services/api';
+import {
+  getTasksCache,
+  saveTasksCache,
+  formatCacheDateTime,
+} from '../../services/offlineTasks';
+import {
+  getPendingTaskStatusCount,
+  processPendingTaskStatusQueue,
+} from '../../services/offlineTaskStatusQueue';
 import newTaskIcon from '../../assets/icons/NovaTarefa.svg';
 import filtersIcon from '../../assets/icons/Filtros.svg';
 import tableSortIcon from '../../assets/icons/TRPSP.svg';
@@ -24,6 +33,15 @@ function Tasks() {
   const [successMessage, setSuccessMessage] = useState('');
   const [taskToDelete, setTaskToDelete] = useState(null);
   const [deletingTaskId, setDeletingTaskId] = useState(null);
+  const [isOffline, setIsOffline] = useState(
+    typeof navigator !== 'undefined' ? !navigator.onLine : false
+  );
+  const [showOfflineCacheMessage, setShowOfflineCacheMessage] = useState(false);
+  const [offlineCacheTimestamp, setOfflineCacheTimestamp] = useState('');
+  const [pendingStatusCount, setPendingStatusCount] = useState(
+    getPendingTaskStatusCount()
+  );
+  const [syncingPendingQueue, setSyncingPendingQueue] = useState(false);
 
   const isAdmin = storedMembership.role === 'ADMIN';
 
@@ -41,37 +59,111 @@ function Tasks() {
     setPriorityFilter('');
   };
 
+  const syncPendingQueue = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setPendingStatusCount(getPendingTaskStatusCount());
+      return;
+    }
+
+    try {
+      setSyncingPendingQueue(true);
+
+      const result = await processPendingTaskStatusQueue(api);
+
+      setPendingStatusCount(getPendingTaskStatusCount());
+
+      if (result.synced > 0) {
+        setSuccessMessage((currentMessage) => {
+          if (currentMessage) {
+            return currentMessage;
+          }
+
+          if (result.synced === 1) {
+            return '1 atualização pendente foi sincronizada com sucesso.';
+          }
+
+          return `${result.synced} atualizações pendentes foram sincronizadas com sucesso.`;
+        });
+      }
+    } catch (error) {
+      const status = error.response?.status;
+
+      if (status === 401) {
+        handleLogout();
+      }
+    } finally {
+      setSyncingPendingQueue(false);
+    }
+  }, [navigate]);
+
   const loadTasks = useCallback(async () => {
+    const filters = {
+      search: searchValue,
+      status: statusFilter,
+      priority: priorityFilter,
+    };
+
     try {
       setLoading(true);
       setErrorMessage('');
+      setShowOfflineCacheMessage(false);
+      setOfflineCacheTimestamp('');
 
       const response = await api.get('/tasks', {
-        params: {
-          search: searchValue,
-          status: statusFilter,
-          priority: priorityFilter,
-        },
+        params: filters,
       });
 
-      setTasks(response.data.tasks || []);
-      setTotalTasks(response.data.total || 0);
+      const responseTasks = response.data.tasks || [];
+      const responseTotal = response.data.total || 0;
+
+      setTasks(responseTasks);
+      setTotalTasks(responseTotal);
+      saveTasksCache({
+        filters,
+        tasks: responseTasks,
+        total: responseTotal,
+      });
+      setPendingStatusCount(getPendingTaskStatusCount());
     } catch (error) {
       const status = error.response?.status;
-      const message =
-        error.response?.data?.message ||
-        'Não foi possível carregar as tarefas.';
 
       if (status === 401) {
         handleLogout();
         return;
       }
 
+      if (isRequestOfflineError(error)) {
+        const cachedData = getTasksCache(filters);
+
+        if (cachedData) {
+          setTasks(cachedData.tasks || []);
+          setTotalTasks(cachedData.total || 0);
+          setShowOfflineCacheMessage(true);
+          setOfflineCacheTimestamp(cachedData.cachedAt || '');
+          setErrorMessage('');
+        } else {
+          setTasks([]);
+          setTotalTasks(0);
+          setShowOfflineCacheMessage(false);
+          setOfflineCacheTimestamp('');
+          setErrorMessage(
+            'Você está sem internet e não há tarefas salvas em cache para estes filtros.'
+          );
+        }
+
+        setPendingStatusCount(getPendingTaskStatusCount());
+        return;
+      }
+
+      const message =
+        error.response?.data?.message ||
+        'Não foi possível carregar as tarefas.';
+
       setErrorMessage(message);
     } finally {
       setLoading(false);
     }
-  }, [searchValue, statusFilter, priorityFilter]);
+  }, [searchValue, statusFilter, priorityFilter, navigate]);
 
   useEffect(() => {
     loadTasks();
@@ -94,6 +186,29 @@ function Tasks() {
       document.body.style.overflow = '';
     };
   }, [taskToDelete]);
+
+  useEffect(() => {
+    const handleOnline = async () => {
+      setIsOffline(false);
+      await syncPendingQueue();
+      await loadTasks();
+    };
+
+    const handleOffline = () => {
+      setIsOffline(true);
+      setPendingStatusCount(getPendingTaskStatusCount());
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    syncPendingQueue();
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [loadTasks, syncPendingQueue]);
 
   const handleOpenDeleteModal = (event, task) => {
     event.stopPropagation();
@@ -139,6 +254,13 @@ function Tasks() {
         return;
       }
 
+      if (isRequestOfflineError(error)) {
+        setErrorMessage(
+          'Você está offline. Conecte-se à internet para excluir tarefas.'
+        );
+        return;
+      }
+
       setErrorMessage(message);
     } finally {
       setDeletingTaskId(null);
@@ -161,6 +283,32 @@ function Tasks() {
     return `${totalTasks} tarefas encontradas`;
   }, [loading, totalTasks, hasActiveFilters]);
 
+  const offlineCacheText = useMemo(() => {
+    if (!offlineCacheTimestamp) {
+      return '';
+    }
+
+    const formattedDate = formatCacheDateTime(offlineCacheTimestamp);
+
+    if (!formattedDate) {
+      return '';
+    }
+
+    return `Última atualização local em ${formattedDate}.`;
+  }, [offlineCacheTimestamp]);
+
+  const pendingQueueText = useMemo(() => {
+    if (pendingStatusCount === 0) {
+      return '';
+    }
+
+    if (pendingStatusCount === 1) {
+      return 'Existe 1 atualização de status pendente de sincronização.';
+    }
+
+    return `Existem ${pendingStatusCount} atualizações de status pendentes de sincronização.`;
+  }, [pendingStatusCount]);
+
   return (
     <AppShell title="Tarefas" pageClassName="tasks-page">
       <div className="tasks-shell">
@@ -177,6 +325,33 @@ function Tasks() {
             </Link>
           )}
         </div>
+
+        <div className={`tasks-connection-banner ${isOffline ? 'offline' : 'online'}`}>
+          <span className="tasks-connection-dot" />
+          <div className="tasks-connection-text">
+            <strong>{isOffline ? 'Modo offline' : 'Online'}</strong>
+            <span>
+              {isOffline
+                ? 'Sem conexão com a internet. O sistema tentará usar os dados salvos neste dispositivo.'
+                : syncingPendingQueue
+                ? 'Conexão ativa. Sincronizando alterações pendentes de status...'
+                : 'Conexão ativa. As tarefas são carregadas normalmente e salvas localmente.'}
+            </span>
+          </div>
+        </div>
+
+        {pendingStatusCount > 0 && (
+          <div className="tasks-feedback offline-queue">
+            {pendingQueueText}
+          </div>
+        )}
+
+        {showOfflineCacheMessage && (
+          <div className="tasks-feedback offline-cache">
+            Exibindo tarefas salvas localmente para estes filtros.{' '}
+            {offlineCacheText}
+          </div>
+        )}
 
         <section className="tasks-filters-card">
           <div className="tasks-search-row">
@@ -333,10 +508,18 @@ function Tasks() {
                   </div>
 
                   <div className="tasks-col status">
-                    <span className={`tasks-pill status ${task.statusClass}`}>
-                      <span className="tasks-status-dot" />
-                      {task.status}
-                    </span>
+                    <div className="tasks-status-cell">
+                      <span className={`tasks-pill status ${task.statusClass}`}>
+                        <span className="tasks-status-dot" />
+                        {task.status}
+                      </span>
+
+                      {task.hasOfflinePendingStatus && (
+                        <span className="tasks-pending-sync-tag">
+                          Pendente de sincronização
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="tasks-col deadline">
