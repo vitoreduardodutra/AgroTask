@@ -1,5 +1,32 @@
 const TASK_DETAILS_CACHE_KEY = 'agrotask_task_details_cache_v1';
 
+function safeParse(value, fallbackValue) {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return fallbackValue;
+  }
+}
+
+function getCurrentOfflineContextKey() {
+  const user = safeParse(localStorage.getItem('agrotask_user') || '{}', {});
+  const farm = safeParse(localStorage.getItem('agrotask_farm') || '{}', {});
+  const membership = safeParse(
+    localStorage.getItem('agrotask_membership') || '{}',
+    {}
+  );
+
+  const farmId = farm?.id ?? 'no-farm';
+  const membershipId = membership?.id ?? membership?.role ?? 'no-membership';
+  const userId = user?.id ?? 'no-user';
+
+  return `farm:${farmId}|membership:${membershipId}|user:${userId}`;
+}
+
+function buildTaskKey(taskId) {
+  return `ctx:${getCurrentOfflineContextKey()}::task:${String(taskId)}`;
+}
+
 function readCacheMap() {
   try {
     const rawValue = localStorage.getItem(TASK_DETAILS_CACHE_KEY);
@@ -35,8 +62,10 @@ export function saveTaskDetailsCache(taskId, task) {
   }
 
   const cacheMap = readCacheMap();
+  const taskKey = buildTaskKey(taskId);
 
-  cacheMap[String(taskId)] = {
+  cacheMap[taskKey] = {
+    contextKey: getCurrentOfflineContextKey(),
     task,
     cachedAt: new Date().toISOString(),
   };
@@ -50,6 +79,11 @@ export function getTaskDetailsCache(taskId) {
   }
 
   const cacheMap = readCacheMap();
+  const taskKey = buildTaskKey(taskId);
+
+  if (cacheMap[taskKey]) {
+    return cacheMap[taskKey];
+  }
 
   return cacheMap[String(taskId)] || null;
 }
@@ -61,6 +95,7 @@ export function clearTaskDetailsCache(taskId) {
   }
 
   const cacheMap = readCacheMap();
+  delete cacheMap[buildTaskKey(taskId)];
   delete cacheMap[String(taskId)];
   writeCacheMap(cacheMap);
 }

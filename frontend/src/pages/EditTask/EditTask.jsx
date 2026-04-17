@@ -1,12 +1,20 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api, { isRequestOfflineError } from '../../services/api';
+import { getTaskDetailsCache } from '../../services/offlineTaskDetails';
 import {
   enqueueTaskStatusUpdate,
   getPendingTaskStatusCount,
   processPendingTaskStatusQueue,
   updateTaskStatusInOfflineCaches,
 } from '../../services/offlineTaskStatusQueue';
+import {
+  checkConnectivityNow,
+  getConnectivitySnapshot,
+  startConnectivityMonitoring,
+  stopConnectivityMonitoring,
+  subscribeToConnectivity,
+} from '../../services/connectivityService';
 import backIcon from '../../assets/icons/Voltar.svg';
 import saveChangesIcon from '../../assets/icons/SalvarAlterações.svg';
 import AppShell from '../../components/AppShell/AppShell';
@@ -26,13 +34,13 @@ function EditTask() {
   const [savingTask, setSavingTask] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-  const [isOffline, setIsOffline] = useState(
-    typeof navigator !== 'undefined' ? !navigator.onLine : false
-  );
+  const [connectivity, setConnectivity] = useState(getConnectivitySnapshot());
   const [pendingStatusCount, setPendingStatusCount] = useState(
     getPendingTaskStatusCount()
   );
   const [syncingPendingQueue, setSyncingPendingQueue] = useState(false);
+
+  const previousOnlineRef = useRef(getConnectivitySnapshot().isOnline);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -43,6 +51,10 @@ function EditTask() {
     priority: 'MEDIUM',
     status: 'PENDING',
   });
+
+  const isOffline = !connectivity.isOnline;
+  const isCheckingConnection = connectivity.isChecking;
+  const isAdminEditDisabled = isAdmin && isOffline;
 
   const pendingQueueText = useMemo(() => {
     if (pendingStatusCount === 0) {
@@ -56,13 +68,13 @@ function EditTask() {
     return `Existem ${pendingStatusCount} atualizações de status pendentes de sincronização.`;
   }, [pendingStatusCount]);
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     localStorage.removeItem('agrotask_token');
     localStorage.removeItem('agrotask_user');
     localStorage.removeItem('agrotask_farm');
     localStorage.removeItem('agrotask_membership');
     navigate('/', { replace: true });
-  };
+  }, [navigate]);
 
   const handleChange = (field, value) => {
     setFormData((prev) => ({
@@ -88,8 +100,23 @@ function EditTask() {
     return adjustedDate.toISOString().slice(0, 16);
   };
 
-  const syncPendingQueue = async () => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+  const buildFormDataFromTask = useCallback(
+    (task) => ({
+      title: task?.title || '',
+      description: task?.description || '',
+      area: task?.area === 'Sem área informada' ? '' : task?.area || '',
+      responsibleId: String(task?.responsible?.id || ''),
+      deadline: formatDateTimeLocal(task?.deadlineRaw || task?.deadlineIso || ''),
+      priority: task?.priorityValue || 'MEDIUM',
+      status: task?.statusValue || 'PENDING',
+    }),
+    []
+  );
+
+  const syncPendingQueue = useCallback(async () => {
+    const connectivitySnapshot = getConnectivitySnapshot();
+
+    if (!connectivitySnapshot.isOnline) {
       setPendingStatusCount(getPendingTaskStatusCount());
       return;
     }
@@ -119,88 +146,96 @@ function EditTask() {
 
       if (status === 401) {
         handleLogout();
-        return;
       }
     } finally {
       setSyncingPendingQueue(false);
     }
-  };
+  }, [handleLogout]);
 
-  useEffect(() => {
-    async function loadPageData() {
-      try {
-        setLoadingPage(true);
-        setErrorMessage('');
-        setSuccessMessage('');
+  const loadPageData = useCallback(async () => {
+    try {
+      setLoadingPage(true);
+      setErrorMessage('');
+      setSuccessMessage('');
 
-        const taskResponse = await api.get(`/tasks/${id}`);
-        const task = taskResponse.data.task;
+      const taskResponse = await api.get(`/tasks/${id}`);
+      const task = taskResponse.data.task;
 
-        setFormData({
-          title: task.title || '',
-          description: task.description || '',
-          area: task.area === 'Sem área informada' ? '' : task.area || '',
-          responsibleId: String(task.responsible?.id || ''),
-          deadline: formatDateTimeLocal(task.deadlineRaw || task.deadlineIso || ''),
-          priority: task.priorityValue || 'MEDIUM',
-          status: task.statusValue || 'PENDING',
-        });
+      setFormData(buildFormDataFromTask(task));
 
-        if (isAdmin) {
-          const formOptionsResponse = await api.get('/tasks/form-options');
-          setUsers(formOptionsResponse.data.users || []);
-        } else {
-          setUsers([]);
-        }
-      } catch (error) {
-        const status = error.response?.status;
-        const message =
-          error.response?.data?.message ||
-          'Não foi possível carregar os dados da tarefa.';
-
-        if (status === 401) {
-          handleLogout();
-          return;
-        }
-
-        if (isRequestOfflineError(error)) {
-          setErrorMessage(
-            'Você está offline. A edição completa da tarefa exige conexão. Para funcionários, o salvamento offline do status continua disponível se a página já estiver carregada.'
-          );
-        } else {
-          setErrorMessage(message);
-        }
-      } finally {
-        setLoadingPage(false);
+      if (isAdmin) {
+        const formOptionsResponse = await api.get('/tasks/form-options');
+        setUsers(formOptionsResponse.data.users || []);
+      } else {
+        setUsers([]);
       }
-    }
+    } catch (error) {
+      const status = error.response?.status;
+      const message =
+        error.response?.data?.message ||
+        'Não foi possível carregar os dados da tarefa.';
 
-    loadPageData();
-  }, [id, isAdmin]);
+      if (status === 401) {
+        handleLogout();
+        return;
+      }
+
+      if (isRequestOfflineError(error)) {
+        const cachedData = getTaskDetailsCache(id);
+
+        if (cachedData?.task) {
+          setFormData(buildFormDataFromTask(cachedData.task));
+
+          if (isAdmin) {
+            setUsers([]);
+            setErrorMessage(
+              'Você está offline. Os dados locais foram carregados, mas a edição completa da tarefa exige conexão com a internet.'
+            );
+          } else {
+            setSuccessMessage(
+              'Você está offline. Os dados locais da tarefa foram carregados e o novo status pode ser salvo para sincronização posterior.'
+            );
+          }
+        } else {
+          setErrorMessage(
+            'Você está offline e não há dados locais suficientes para carregar esta edição.'
+          );
+        }
+      } else {
+        setErrorMessage(message);
+      }
+    } finally {
+      setLoadingPage(false);
+    }
+  }, [id, isAdmin, handleLogout, buildFormDataFromTask]);
 
   useEffect(() => {
-    setPendingStatusCount(getPendingTaskStatusCount());
+    loadPageData();
+  }, [loadPageData]);
 
-    const handleOnline = async () => {
-      setIsOffline(false);
-      await syncPendingQueue();
-    };
+  useEffect(() => {
+    const unsubscribe = subscribeToConnectivity(setConnectivity);
 
-    const handleOffline = () => {
-      setIsOffline(true);
-      setPendingStatusCount(getPendingTaskStatusCount());
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    syncPendingQueue();
+    startConnectivityMonitoring();
+    void checkConnectivityNow();
+    void syncPendingQueue();
 
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      unsubscribe();
+      stopConnectivityMonitoring();
     };
-  }, []);
+  }, [syncPendingQueue]);
+
+  useEffect(() => {
+    const wasOnline = previousOnlineRef.current;
+
+    if (!wasOnline && connectivity.isOnline) {
+      void syncPendingQueue();
+      void loadPageData();
+    }
+
+    previousOnlineRef.current = connectivity.isOnline;
+  }, [connectivity.isOnline, loadPageData, syncPendingQueue]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -296,12 +331,20 @@ function EditTask() {
           <div className={`edit-task-connection-banner ${isOffline ? 'offline' : 'online'}`}>
             <span className="edit-task-connection-dot" />
             <div className="edit-task-connection-text">
-              <strong>{isOffline ? 'Modo offline' : 'Online'}</strong>
+              <strong>
+                {isCheckingConnection
+                  ? 'Verificando conexão'
+                  : isOffline
+                  ? 'Modo offline'
+                  : 'Online'}
+              </strong>
               <span>
-                {isOffline
+                {isCheckingConnection
+                  ? 'Validando se o backend do AgroTask está acessível neste dispositivo...'
+                  : isOffline
                   ? isAdmin
-                    ? 'Sem conexão com a internet. A edição completa da tarefa está indisponível offline.'
-                    : 'Sem conexão com a internet. Você ainda pode salvar o status, e a sincronização acontecerá quando a conexão voltar.'
+                    ? 'Sem conexão utilizável com o sistema. A edição completa da tarefa fica indisponível offline.'
+                    : 'Sem conexão utilizável com o sistema. Você ainda pode salvar o status, e a sincronização acontecerá quando a conexão voltar.'
                   : syncingPendingQueue
                   ? 'Conexão ativa. Verificando sincronização de status pendentes...'
                   : 'Conexão ativa. As alterações são enviadas normalmente e os status pendentes podem ser sincronizados.'}
@@ -348,7 +391,7 @@ function EditTask() {
                       }
                       placeholder="Ex: Aplicação de defensivo – Talhão 4"
                       required
-                      disabled={!isAdmin}
+                      disabled={!isAdmin || isAdminEditDisabled}
                     />
                   </div>
 
@@ -365,7 +408,7 @@ function EditTask() {
                         handleChange('description', event.target.value)
                       }
                       required
-                      disabled={!isAdmin}
+                      disabled={!isAdmin || isAdminEditDisabled}
                     />
                   </div>
 
@@ -379,7 +422,7 @@ function EditTask() {
                         handleChange('area', event.target.value)
                       }
                       placeholder="Ex: Pastagem A, Talhão 4, Galpão 2"
-                      disabled={!isAdmin}
+                      disabled={!isAdmin || isAdminEditDisabled}
                     />
                   </div>
                 </div>
@@ -402,7 +445,7 @@ function EditTask() {
                         handleChange('responsibleId', event.target.value)
                       }
                       required
-                      disabled={!isAdmin}
+                      disabled={!isAdmin || isAdminEditDisabled}
                     >
                       <option value="">Selecione um responsável</option>
 
@@ -426,7 +469,7 @@ function EditTask() {
                         handleChange('deadline', event.target.value)
                       }
                       required
-                      disabled={!isAdmin}
+                      disabled={!isAdmin || isAdminEditDisabled}
                     />
                   </div>
                 </div>
@@ -451,7 +494,7 @@ function EditTask() {
                             formData.priority === 'LOW' ? 'active low' : ''
                           }`}
                           onClick={() => handleChange('priority', 'LOW')}
-                          disabled={!isAdmin}
+                          disabled={!isAdmin || isAdminEditDisabled}
                         >
                           Baixa
                         </button>
@@ -464,7 +507,7 @@ function EditTask() {
                               : ''
                           }`}
                           onClick={() => handleChange('priority', 'MEDIUM')}
-                          disabled={!isAdmin}
+                          disabled={!isAdmin || isAdminEditDisabled}
                         >
                           Média
                         </button>
@@ -475,7 +518,7 @@ function EditTask() {
                             formData.priority === 'HIGH' ? 'active high' : ''
                           }`}
                           onClick={() => handleChange('priority', 'HIGH')}
-                          disabled={!isAdmin}
+                          disabled={!isAdmin || isAdminEditDisabled}
                         >
                           Alta
                         </button>
@@ -561,7 +604,7 @@ function EditTask() {
                 <button
                   type="submit"
                   className="edit-task-save-button"
-                  disabled={savingTask}
+                  disabled={savingTask || (isAdmin && isOffline)}
                 >
                   <img
                     src={saveChangesIcon}

@@ -1,18 +1,32 @@
 import axios from 'axios';
+import { markOffline, markOnline } from './connectivityService';
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 export function isRequestOfflineError(error) {
-  const status = error.response?.status;
+  const status = error?.response?.status;
+  const code = error?.code;
+  const message = String(error?.message || '').toLowerCase();
+  const browserOffline =
+    typeof navigator !== 'undefined' ? navigator.onLine === false : false;
 
-  return !error.response && (
-    error.code === 'ERR_NETWORK' ||
-    error.code === 'ECONNABORTED' ||
-    navigator.onLine === false ||
-    status === 0
+  return (
+    !error?.response &&
+    (
+      code === 'ERR_NETWORK' ||
+      code === 'ECONNABORTED' ||
+      code === 'ETIMEDOUT' ||
+      browserOffline ||
+      status === 0 ||
+      message.includes('network error') ||
+      message.includes('timeout') ||
+      message.includes('failed to fetch')
+    )
   );
 }
 
 const api = axios.create({
-  baseURL: 'http://localhost:3001',
+  baseURL: API_BASE_URL,
   timeout: 10000,
 });
 
@@ -30,10 +44,17 @@ api.interceptors.request.use(
 );
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    markOnline('api-success');
+    return response;
+  },
   (error) => {
     const status = error.response?.status;
     const currentPath = window.location.pathname;
+
+    if (isRequestOfflineError(error)) {
+      markOffline('api-error');
+    }
 
     if (status === 401 && currentPath !== '/') {
       localStorage.removeItem('agrotask_token');

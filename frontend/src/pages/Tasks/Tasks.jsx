@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api, { isRequestOfflineError } from '../../services/api';
 import {
@@ -10,6 +10,13 @@ import {
   getPendingTaskStatusCount,
   processPendingTaskStatusQueue,
 } from '../../services/offlineTaskStatusQueue';
+import {
+  checkConnectivityNow,
+  getConnectivitySnapshot,
+  startConnectivityMonitoring,
+  stopConnectivityMonitoring,
+  subscribeToConnectivity,
+} from '../../services/connectivityService';
 import newTaskIcon from '../../assets/icons/NovaTarefa.svg';
 import filtersIcon from '../../assets/icons/Filtros.svg';
 import tableSortIcon from '../../assets/icons/TRPSP.svg';
@@ -33,9 +40,7 @@ function Tasks() {
   const [successMessage, setSuccessMessage] = useState('');
   const [taskToDelete, setTaskToDelete] = useState(null);
   const [deletingTaskId, setDeletingTaskId] = useState(null);
-  const [isOffline, setIsOffline] = useState(
-    typeof navigator !== 'undefined' ? !navigator.onLine : false
-  );
+  const [connectivity, setConnectivity] = useState(getConnectivitySnapshot());
   const [showOfflineCacheMessage, setShowOfflineCacheMessage] = useState(false);
   const [offlineCacheTimestamp, setOfflineCacheTimestamp] = useState('');
   const [pendingStatusCount, setPendingStatusCount] = useState(
@@ -43,15 +48,19 @@ function Tasks() {
   );
   const [syncingPendingQueue, setSyncingPendingQueue] = useState(false);
 
-  const isAdmin = storedMembership.role === 'ADMIN';
+  const previousOnlineRef = useRef(getConnectivitySnapshot().isOnline);
 
-  const handleLogout = () => {
+  const isAdmin = storedMembership.role === 'ADMIN';
+  const isOffline = !connectivity.isOnline;
+  const isCheckingConnection = connectivity.isChecking;
+
+  const handleLogout = useCallback(() => {
     localStorage.removeItem('agrotask_token');
     localStorage.removeItem('agrotask_user');
     localStorage.removeItem('agrotask_farm');
     localStorage.removeItem('agrotask_membership');
     navigate('/', { replace: true });
-  };
+  }, [navigate]);
 
   const clearFilters = () => {
     setSearchValue('');
@@ -60,7 +69,9 @@ function Tasks() {
   };
 
   const syncPendingQueue = useCallback(async () => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    const connectivitySnapshot = getConnectivitySnapshot();
+
+    if (!connectivitySnapshot.isOnline) {
       setPendingStatusCount(getPendingTaskStatusCount());
       return;
     }
@@ -94,7 +105,7 @@ function Tasks() {
     } finally {
       setSyncingPendingQueue(false);
     }
-  }, [navigate]);
+  }, [handleLogout]);
 
   const loadTasks = useCallback(async () => {
     const filters = {
@@ -118,11 +129,13 @@ function Tasks() {
 
       setTasks(responseTasks);
       setTotalTasks(responseTotal);
+
       saveTasksCache({
         filters,
         tasks: responseTasks,
         total: responseTotal,
       });
+
       setPendingStatusCount(getPendingTaskStatusCount());
     } catch (error) {
       const status = error.response?.status;
@@ -163,11 +176,35 @@ function Tasks() {
     } finally {
       setLoading(false);
     }
-  }, [searchValue, statusFilter, priorityFilter, navigate]);
+  }, [searchValue, statusFilter, priorityFilter, handleLogout]);
 
   useEffect(() => {
     loadTasks();
   }, [loadTasks]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToConnectivity(setConnectivity);
+
+    startConnectivityMonitoring();
+    void checkConnectivityNow();
+    void syncPendingQueue();
+
+    return () => {
+      unsubscribe();
+      stopConnectivityMonitoring();
+    };
+  }, [syncPendingQueue]);
+
+  useEffect(() => {
+    const wasOnline = previousOnlineRef.current;
+
+    if (!wasOnline && connectivity.isOnline) {
+      void syncPendingQueue();
+      void loadTasks();
+    }
+
+    previousOnlineRef.current = connectivity.isOnline;
+  }, [connectivity.isOnline, loadTasks, syncPendingQueue]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -186,29 +223,6 @@ function Tasks() {
       document.body.style.overflow = '';
     };
   }, [taskToDelete]);
-
-  useEffect(() => {
-    const handleOnline = async () => {
-      setIsOffline(false);
-      await syncPendingQueue();
-      await loadTasks();
-    };
-
-    const handleOffline = () => {
-      setIsOffline(true);
-      setPendingStatusCount(getPendingTaskStatusCount());
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    syncPendingQueue();
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, [loadTasks, syncPendingQueue]);
 
   const handleOpenDeleteModal = (event, task) => {
     event.stopPropagation();
@@ -329,10 +343,18 @@ function Tasks() {
         <div className={`tasks-connection-banner ${isOffline ? 'offline' : 'online'}`}>
           <span className="tasks-connection-dot" />
           <div className="tasks-connection-text">
-            <strong>{isOffline ? 'Modo offline' : 'Online'}</strong>
+            <strong>
+              {isCheckingConnection
+                ? 'Verificando conexão'
+                : isOffline
+                ? 'Modo offline'
+                : 'Online'}
+            </strong>
             <span>
-              {isOffline
-                ? 'Sem conexão com a internet. O sistema tentará usar os dados salvos neste dispositivo.'
+              {isCheckingConnection
+                ? 'Validando se o backend do AgroTask está acessível neste dispositivo...'
+                : isOffline
+                ? 'Sem conexão utilizável com o sistema. O app tentará usar os dados salvos neste dispositivo.'
                 : syncingPendingQueue
                 ? 'Conexão ativa. Sincronizando alterações pendentes de status...'
                 : 'Conexão ativa. As tarefas são carregadas normalmente e salvas localmente.'}

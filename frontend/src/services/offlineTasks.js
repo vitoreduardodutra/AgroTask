@@ -1,5 +1,44 @@
 const TASKS_CACHE_KEY = 'agrotask_tasks_cache_v1';
 
+function safeParse(value, fallbackValue) {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return fallbackValue;
+  }
+}
+
+function getStoredObject(key) {
+  const rawValue = localStorage.getItem(key);
+
+  if (!rawValue) {
+    return {};
+  }
+
+  const parsed = safeParse(rawValue, {});
+
+  if (!parsed || typeof parsed !== 'object') {
+    return {};
+  }
+
+  return parsed;
+}
+
+function getCurrentOfflineContextKey() {
+  const user = safeParse(localStorage.getItem('agrotask_user') || '{}', {});
+  const farm = safeParse(localStorage.getItem('agrotask_farm') || '{}', {});
+  const membership = safeParse(
+    localStorage.getItem('agrotask_membership') || '{}',
+    {}
+  );
+
+  const farmId = farm?.id ?? 'no-farm';
+  const membershipId = membership?.id ?? membership?.role ?? 'no-membership';
+  const userId = user?.id ?? 'no-user';
+
+  return `farm:${farmId}|membership:${membershipId}|user:${userId}`;
+}
+
 function normalizeFilters(filters = {}) {
   return {
     search: String(filters.search || '').trim(),
@@ -10,25 +49,14 @@ function normalizeFilters(filters = {}) {
 
 function buildFiltersKey(filters = {}) {
   const normalized = normalizeFilters(filters);
+  const contextKey = getCurrentOfflineContextKey();
 
-  return JSON.stringify(normalized);
+  return `ctx:${contextKey}::filters:${JSON.stringify(normalized)}`;
 }
 
 function readCacheMap() {
   try {
-    const rawValue = localStorage.getItem(TASKS_CACHE_KEY);
-
-    if (!rawValue) {
-      return {};
-    }
-
-    const parsedValue = JSON.parse(rawValue);
-
-    if (!parsedValue || typeof parsedValue !== 'object') {
-      return {};
-    }
-
-    return parsedValue;
+    return getStoredObject(TASKS_CACHE_KEY);
   } catch (error) {
     console.error('Erro ao ler cache offline de tarefas:', error);
     return {};
@@ -46,8 +74,10 @@ function writeCacheMap(cacheMap) {
 export function saveTasksCache({ filters, tasks, total }) {
   const cacheMap = readCacheMap();
   const filtersKey = buildFiltersKey(filters);
+  const contextKey = getCurrentOfflineContextKey();
 
   cacheMap[filtersKey] = {
+    contextKey,
     filters: normalizeFilters(filters),
     tasks: Array.isArray(tasks) ? tasks : [],
     total: Number(total || 0),
@@ -61,7 +91,13 @@ export function getTasksCache(filters) {
   const cacheMap = readCacheMap();
   const filtersKey = buildFiltersKey(filters);
 
-  return cacheMap[filtersKey] || null;
+  if (cacheMap[filtersKey]) {
+    return cacheMap[filtersKey];
+  }
+
+  const legacyKey = JSON.stringify(normalizeFilters(filters));
+
+  return cacheMap[legacyKey] || null;
 }
 
 export function clearTasksCache() {

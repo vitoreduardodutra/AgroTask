@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api, { isRequestOfflineError } from '../../services/api';
 import {
@@ -10,6 +10,13 @@ import {
   getPendingTaskStatusCount,
   processPendingTaskStatusQueue,
 } from '../../services/offlineTaskStatusQueue';
+import {
+  checkConnectivityNow,
+  getConnectivitySnapshot,
+  startConnectivityMonitoring,
+  stopConnectivityMonitoring,
+  subscribeToConnectivity,
+} from '../../services/connectivityService';
 import backIcon from '../../assets/icons/Voltar.svg';
 import responsibleIcon from '../../assets/icons/Responsável.svg';
 import deadlineIcon from '../../assets/icons/Prazo.svg';
@@ -34,18 +41,22 @@ function TaskDetails() {
   const [task, setTask] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const [successFeedbackMessage, setSuccessFeedbackMessage] = useState('');
   const [previewEvidence, setPreviewEvidence] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [downloadingEvidenceId, setDownloadingEvidenceId] = useState(null);
-  const [isOffline, setIsOffline] = useState(
-    typeof navigator !== 'undefined' ? !navigator.onLine : false
-  );
+  const [connectivity, setConnectivity] = useState(getConnectivitySnapshot());
   const [showOfflineCacheMessage, setShowOfflineCacheMessage] = useState(false);
   const [offlineCacheTimestamp, setOfflineCacheTimestamp] = useState('');
   const [pendingStatusCount, setPendingStatusCount] = useState(
     getPendingTaskStatusCount()
   );
   const [syncingPendingQueue, setSyncingPendingQueue] = useState(false);
+
+  const previousOnlineRef = useRef(getConnectivitySnapshot().isOnline);
+
+  const isOffline = !connectivity.isOnline;
+  const isCheckingConnection = connectivity.isChecking;
 
   const apiBaseUrl = useMemo(() => {
     return (api.defaults.baseURL || '').replace(/\/$/, '');
@@ -77,13 +88,13 @@ function TaskDetails() {
     return `Existem ${pendingStatusCount} atualizações de status pendentes de sincronização.`;
   }, [pendingStatusCount]);
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     localStorage.removeItem('agrotask_token');
     localStorage.removeItem('agrotask_user');
     localStorage.removeItem('agrotask_farm');
     localStorage.removeItem('agrotask_membership');
     navigate('/', { replace: true });
-  };
+  }, [navigate]);
 
   const getPriorityIcon = (priorityValue) => {
     if (priorityValue === 'MEDIUM') {
@@ -127,7 +138,9 @@ function TaskDetails() {
   };
 
   const syncPendingQueue = useCallback(async () => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    const connectivitySnapshot = getConnectivitySnapshot();
+
+    if (!connectivitySnapshot.isOnline) {
       setPendingStatusCount(getPendingTaskStatusCount());
       return;
     }
@@ -155,9 +168,7 @@ function TaskDetails() {
     } finally {
       setSyncingPendingQueue(false);
     }
-  }, [navigate]);
-
-  const [successFeedbackMessage, setSuccessFeedbackMessage] = useState('');
+  }, [handleLogout]);
 
   const openEvidencePreview = async (evidence) => {
     if (!evidence) {
@@ -329,11 +340,35 @@ function TaskDetails() {
     } finally {
       setLoading(false);
     }
-  }, [id, navigate]);
+  }, [id, handleLogout]);
 
   useEffect(() => {
     loadTaskDetails();
   }, [loadTaskDetails]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToConnectivity(setConnectivity);
+
+    startConnectivityMonitoring();
+    void checkConnectivityNow();
+    void syncPendingQueue();
+
+    return () => {
+      unsubscribe();
+      stopConnectivityMonitoring();
+    };
+  }, [syncPendingQueue]);
+
+  useEffect(() => {
+    const wasOnline = previousOnlineRef.current;
+
+    if (!wasOnline && connectivity.isOnline) {
+      void syncPendingQueue();
+      void loadTaskDetails();
+    }
+
+    previousOnlineRef.current = connectivity.isOnline;
+  }, [connectivity.isOnline, loadTaskDetails, syncPendingQueue]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -352,29 +387,6 @@ function TaskDetails() {
       document.body.style.overflow = '';
     };
   }, [previewEvidence]);
-
-  useEffect(() => {
-    const handleOnline = async () => {
-      setIsOffline(false);
-      await syncPendingQueue();
-      await loadTaskDetails();
-    };
-
-    const handleOffline = () => {
-      setIsOffline(true);
-      setPendingStatusCount(getPendingTaskStatusCount());
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    syncPendingQueue();
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, [loadTaskDetails, syncPendingQueue]);
 
   useEffect(() => {
     return () => {
@@ -426,10 +438,18 @@ function TaskDetails() {
           >
             <span className="task-details-connection-dot" />
             <div className="task-details-connection-text">
-              <strong>{isOffline ? 'Modo offline' : 'Online'}</strong>
+              <strong>
+                {isCheckingConnection
+                  ? 'Verificando conexão'
+                  : isOffline
+                  ? 'Modo offline'
+                  : 'Online'}
+              </strong>
               <span>
-                {isOffline
-                  ? 'Sem conexão com a internet. O sistema tentará usar os detalhes salvos neste dispositivo.'
+                {isCheckingConnection
+                  ? 'Validando se o backend do AgroTask está acessível neste dispositivo...'
+                  : isOffline
+                  ? 'Sem conexão utilizável com o sistema. O app tentará usar os detalhes salvos neste dispositivo.'
                   : syncingPendingQueue
                   ? 'Conexão ativa. Sincronizando alterações pendentes de status...'
                   : 'Conexão ativa. Os detalhes da tarefa são carregados normalmente e salvos localmente.'}
