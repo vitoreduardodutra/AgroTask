@@ -1,0 +1,25 @@
+name: Discord Commits
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Discord notification
+        uses: rjstone/discord-webhook-notify@v2
+        with:
+          webhookUrl: ${{ secrets.DISCORD_WEBHOOK }}
+          username: AgroTask GitHub
+          avatarUrl: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
+          title: Novo commit no AgroTask
+          description: |
+            **Autor:** `${{ github.actor }}`
+            **Branch:** `${{ github.ref_name }}`
+            **Mensagem:** `${{ github.event.head_commit.message }}`
+            **Link:** [Abrir commit](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+          severity: info
