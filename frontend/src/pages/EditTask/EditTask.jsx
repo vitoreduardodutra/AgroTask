@@ -41,6 +41,8 @@ function EditTask() {
   const [syncingPendingQueue, setSyncingPendingQueue] = useState(false);
 
   const previousOnlineRef = useRef(getConnectivitySnapshot().isOnline);
+  const statusFeedbackRef = useRef(null);
+  const submitActionsRef = useRef(null);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -71,6 +73,33 @@ function EditTask() {
 
     return `Existem ${pendingStatusCount} atualizações de status pendentes de sincronização.`;
   }, [pendingStatusCount]);
+
+  const completionContextualError = useMemo(() => {
+    if (isAdmin) {
+      return '';
+    }
+
+    if (formData.status !== 'COMPLETED') {
+      return '';
+    }
+
+    if (!errorMessage) {
+      return '';
+    }
+
+    const normalizedMessage = String(errorMessage).toLowerCase();
+
+    const isEvidenceRequirementMessage =
+      normalizedMessage.includes('esta tarefa exige') ||
+      normalizedMessage.includes('evidência com') ||
+      normalizedMessage.includes('antes da conclusão');
+
+    if (!isEvidenceRequirementMessage) {
+      return '';
+    }
+
+    return errorMessage;
+  }, [errorMessage, formData.status, isAdmin]);
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem('agrotask_token');
@@ -245,6 +274,17 @@ function EditTask() {
     previousOnlineRef.current = connectivity.isOnline;
   }, [connectivity.isOnline, loadPageData, syncPendingQueue]);
 
+  useEffect(() => {
+    if (!completionContextualError) {
+      return;
+    }
+
+    statusFeedbackRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+  }, [completionContextualError]);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
 
@@ -370,7 +410,7 @@ function EditTask() {
             </div>
           )}
 
-          {errorMessage && (
+          {errorMessage && !completionContextualError && (
             <div className="edit-task-feedback error">{errorMessage}</div>
           )}
 
@@ -607,6 +647,19 @@ function EditTask() {
                           )}
                         </button>
                       </div>
+
+                      {completionContextualError && (
+                        <div
+                          ref={statusFeedbackRef}
+                          className="edit-task-feedback error"
+                          style={{ marginTop: 16, marginBottom: 0 }}
+                        >
+                          <strong style={{ display: 'block', marginBottom: 6 }}>
+                            Não foi possível concluir a tarefa agora.
+                          </strong>
+                          <span>{completionContextualError}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -682,7 +735,7 @@ function EditTask() {
                 </section>
               )}
 
-              <div className="edit-task-actions">
+              <div className="edit-task-actions" ref={submitActionsRef}>
                 <button
                   type="submit"
                   className="edit-task-save-button"

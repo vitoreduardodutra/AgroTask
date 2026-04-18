@@ -20,17 +20,42 @@ const allowedMimeTypes = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ];
 
+function decodeFileName(fileName) {
+  if (!fileName) {
+    return 'arquivo';
+  }
+
+  try {
+    return Buffer.from(fileName, 'latin1').toString('utf8');
+  } catch (error) {
+    return fileName;
+  }
+}
+
+function sanitizeFileName(fileName) {
+  return decodeFileName(fileName)
+    .normalize('NFC')
+    .trim();
+}
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadDirectory);
   },
   filename: (req, file, cb) => {
-    const extension = path.extname(file.originalname);
+    const normalizedOriginalName = sanitizeFileName(file.originalname);
+    const extension = path.extname(normalizedOriginalName);
     const fileNameWithoutExtension = path
-      .basename(file.originalname, extension)
-      .replace(/[^a-zA-Z0-9-_]/g, '_');
+      .basename(normalizedOriginalName, extension)
+      .replace(/\s+/g, '-')
+      .replace(/[^\p{L}\p{N}._-]/gu, '_')
+      .replace(/_+/g, '_')
+      .replace(/-+/g, '-')
+      .replace(/^[-_.]+|[-_.]+$/g, '') || 'evidencia';
 
-    cb(cb ? null : null, `${Date.now()}-${fileNameWithoutExtension}${extension}`);
+    file.originalname = normalizedOriginalName;
+
+    cb(null, `${Date.now()}-${fileNameWithoutExtension}${extension}`);
   },
 });
 
@@ -40,6 +65,8 @@ const uploadEvidence = multer({
     fileSize: 10 * 1024 * 1024,
   },
   fileFilter: (req, file, cb) => {
+    file.originalname = sanitizeFileName(file.originalname);
+
     if (allowedMimeTypes.includes(file.mimetype)) {
       cb(null, true);
       return;

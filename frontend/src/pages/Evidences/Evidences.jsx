@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
 import backIcon from '../../assets/icons/Voltar.svg';
@@ -28,10 +28,38 @@ function Evidences() {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [previewEvidence, setPreviewEvidence] = useState(null);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceInterimText, setVoiceInterimText] = useState('');
+
+  const submitFeedbackRef = useRef(null);
+  const speechRecognitionRef = useRef(null);
+  const speechRecognitionSupportedRef = useRef(false);
 
   const apiBaseUrl = useMemo(() => {
     return (api.defaults.baseURL || '').replace(/\/$/, '');
   }, []);
+
+  const submissionContextualError = useMemo(() => {
+    if (!errorMessage) {
+      return '';
+    }
+
+    const normalizedMessage = String(errorMessage).toLowerCase();
+
+    const isRequirementMessage =
+      normalizedMessage.includes('esta tarefa exige') ||
+      normalizedMessage.includes('evidência com') ||
+      normalizedMessage.includes('capture a localização antes de enviar') ||
+      normalizedMessage.includes('preencha a observação para continuar') ||
+      normalizedMessage.includes('selecione uma imagem');
+
+    if (!isRequirementMessage) {
+      return '';
+    }
+
+    return errorMessage;
+  }, [errorMessage]);
 
   const handleLogout = () => {
     localStorage.removeItem('agrotask_token');
@@ -39,6 +67,158 @@ function Evidences() {
     localStorage.removeItem('agrotask_farm');
     localStorage.removeItem('agrotask_membership');
     navigate('/', { replace: true });
+  };
+
+  const formatCoordinate = (value) => {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) {
+      return '--';
+    }
+
+    return Number(value).toFixed(6);
+  };
+
+  const stopVoiceRecognition = () => {
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.stop();
+      } catch (error) {
+        return;
+      }
+    }
+  };
+
+  const appendTranscriptToNote = (transcript) => {
+    const normalizedTranscript = String(transcript || '').trim();
+
+    if (!normalizedTranscript) {
+      return;
+    }
+
+    setNote((currentValue) => {
+      const baseText = String(currentValue || '').trim();
+
+      if (!baseText) {
+        return normalizedTranscript;
+      }
+
+      const needsSeparator = /[.!?…:]$/.test(baseText);
+      return `${baseText}${needsSeparator ? ' ' : '. '}${normalizedTranscript}`;
+    });
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setVoiceSupported(false);
+      speechRecognitionSupportedRef.current = false;
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'pt-BR';
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setVoiceListening(true);
+      setVoiceInterimText('');
+      setErrorMessage('');
+      setSuccessMessage('');
+    };
+
+    recognition.onresult = (event) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const transcript = event.results[index][0]?.transcript || '';
+
+        if (event.results[index].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      setVoiceInterimText(interimTranscript.trim());
+
+      if (finalTranscript.trim()) {
+        appendTranscriptToNote(finalTranscript);
+      }
+    };
+
+    recognition.onerror = (event) => {
+      const errorCode = event?.error;
+
+      if (errorCode === 'not-allowed' || errorCode === 'service-not-allowed') {
+        setErrorMessage(
+          'O acesso ao microfone foi bloqueado. Permita o uso do microfone no navegador para usar a transcrição por voz.'
+        );
+      } else if (errorCode === 'no-speech') {
+        setErrorMessage('Nenhuma fala foi detectada. Tente novamente.');
+      } else if (errorCode === 'audio-capture') {
+        setErrorMessage(
+          'Não foi possível acessar o microfone deste dispositivo.'
+        );
+      } else {
+        setErrorMessage(
+          'Não foi possível usar a transcrição por voz neste momento.'
+        );
+      }
+
+      setVoiceListening(false);
+      setVoiceInterimText('');
+    };
+
+    recognition.onend = () => {
+      setVoiceListening(false);
+      setVoiceInterimText('');
+    };
+
+    speechRecognitionRef.current = recognition;
+    speechRecognitionSupportedRef.current = true;
+    setVoiceSupported(true);
+
+    return () => {
+      try {
+        recognition.onstart = null;
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        recognition.stop();
+      } catch (error) {
+        return;
+      }
+    };
+  }, []);
+
+  const handleVoiceToggle = () => {
+    if (!speechRecognitionSupportedRef.current || !speechRecognitionRef.current) {
+      setErrorMessage(
+        'A transcrição por voz não é compatível com este navegador.'
+      );
+      return;
+    }
+
+    if (voiceListening) {
+      stopVoiceRecognition();
+      return;
+    }
+
+    try {
+      speechRecognitionRef.current.start();
+    } catch (error) {
+      setErrorMessage(
+        'Não foi possível iniciar a escuta por voz agora. Tente novamente.'
+      );
+    }
   };
 
   const loadTaskDetails = async () => {
@@ -86,6 +266,23 @@ function Evidences() {
       document.body.style.overflow = '';
     };
   }, [previewEvidence]);
+
+  useEffect(() => {
+    if (!submissionContextualError) {
+      return;
+    }
+
+    submitFeedbackRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+  }, [submissionContextualError]);
+
+  useEffect(() => {
+    return () => {
+      stopVoiceRecognition();
+    };
+  }, []);
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0] || null;
@@ -178,10 +375,8 @@ function Evidences() {
       if (
         task?.requireLocationEvidence &&
         !hasExistingLocationEvidence &&
-        (
-          capturedLocation.latitude === null ||
-          capturedLocation.longitude === null
-        )
+        (capturedLocation.latitude === null ||
+          capturedLocation.longitude === null)
       ) {
         setErrorMessage(
           'Esta tarefa exige pelo menos uma evidência com localização. Capture a localização antes de enviar.'
@@ -213,6 +408,7 @@ function Evidences() {
       );
       setSelectedFile(null);
       setNote('');
+      setVoiceInterimText('');
       setCapturedLocation({
         latitude: null,
         longitude: null,
@@ -365,7 +561,7 @@ function Evidences() {
             </p>
           </div>
 
-          {errorMessage && (
+          {errorMessage && !submissionContextualError && (
             <div className="evidences-feedback error">{errorMessage}</div>
           )}
 
@@ -385,19 +581,27 @@ function Evidences() {
                 <ul className="evidences-tips-list">
                   <li>
                     Aprovação de conclusão:{' '}
-                    {task?.completionRequiresApproval ? 'obrigatória' : 'não obrigatória'}
+                    {task?.completionRequiresApproval
+                      ? 'obrigatória'
+                      : 'não obrigatória'}
                   </li>
                   <li>
                     Evidência com foto:{' '}
-                    {task?.requirePhotoEvidence ? 'obrigatória' : 'não obrigatória'}
+                    {task?.requirePhotoEvidence
+                      ? 'obrigatória'
+                      : 'não obrigatória'}
                   </li>
                   <li>
                     Evidência com observação:{' '}
-                    {task?.requireNoteEvidence ? 'obrigatória' : 'não obrigatória'}
+                    {task?.requireNoteEvidence
+                      ? 'obrigatória'
+                      : 'não obrigatória'}
                   </li>
                   <li>
                     Evidência com localização:{' '}
-                    {task?.requireLocationEvidence ? 'obrigatória' : 'não obrigatória'}
+                    {task?.requireLocationEvidence
+                      ? 'obrigatória'
+                      : 'não obrigatória'}
                   </li>
                 </ul>
               </section>
@@ -408,52 +612,185 @@ function Evidences() {
                 </div>
 
                 <div className="evidences-card-body">
-                  <label htmlFor="arquivo" className="evidences-upload-area">
-                    <input
-                      id="arquivo"
-                      type="file"
-                      className="evidences-file-input"
-                      onChange={handleFileChange}
-                    />
-
-                    <div className="evidences-upload-icon-box">
-                      <img
-                        src={uploadEvidenceIcon}
-                        alt=""
-                        className="evidences-upload-icon"
+                  <div className="evidences-support-panel">
+                    <label htmlFor="arquivo" className="evidences-upload-area">
+                      <input
+                        id="arquivo"
+                        type="file"
+                        className="evidences-file-input"
+                        onChange={handleFileChange}
                       />
+
+                      <div className="evidences-upload-icon-box">
+                        <img
+                          src={uploadEvidenceIcon}
+                          alt=""
+                          className="evidences-upload-icon"
+                        />
+                      </div>
+
+                      <strong>Arraste ou clique para selecionar</strong>
+                      <span>Imagens, PDF, Excel ou Word — até 10 MB</span>
+
+                      {selectedFile && (
+                        <small className="evidences-selected-file">
+                          Arquivo selecionado: {selectedFile.name}
+                        </small>
+                      )}
+                    </label>
+
+                    <div className="evidences-note-card">
+                      <span className="evidences-section-label">Observação</span>
+                      <div className="evidences-section-title">
+                        Adicione contexto para a evidência
+                      </div>
+                      <div className="evidences-section-description">
+                        Use esse campo para explicar o que foi executado, o estado atual da tarefa ou qualquer detalhe importante para validação.
+                      </div>
+
+                      <div className="evidences-field">
+                        <div className="evidences-voice-toolbar">
+                          <button
+                            type="button"
+                            className={`evidences-voice-button ${
+                              voiceListening ? 'listening' : ''
+                            }`}
+                            onClick={handleVoiceToggle}
+                            disabled={!voiceSupported}
+                            aria-label={
+                              voiceListening
+                                ? 'Parar transcrição por voz'
+                                : 'Iniciar transcrição por voz'
+                            }
+                            title={
+                              voiceSupported
+                                ? voiceListening
+                                  ? 'Parar transcrição por voz'
+                                  : 'Ditar observação'
+                                : 'Transcrição por voz não compatível neste navegador'
+                            }
+                          >
+                            <span className="evidences-voice-button-icon">🎤</span>
+                            <span className="evidences-voice-button-text">
+                              {voiceListening ? 'Ouvindo...' : 'Ditar observação'}
+                            </span>
+                          </button>
+
+                          {voiceInterimText && (
+                            <span className="evidences-voice-status">
+                              Transcrevendo: {voiceInterimText}
+                            </span>
+                          )}
+                        </div>
+
+                        <textarea
+                          id="observacao"
+                          rows="4"
+                          placeholder="Descreva o que está sendo enviado nesta evidência..."
+                          value={note}
+                          onChange={(event) => setNote(event.target.value)}
+                        />
+
+                        {voiceSupported && !voiceListening && (
+                          <span className="evidences-field-helper">
+                            Toque no microfone para falar e converter sua fala em texto.
+                          </span>
+                        )}
+
+                        {!voiceSupported && (
+                          <span className="evidences-field-helper">
+                            A transcrição por voz não está disponível neste navegador.
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    <strong>Arraste ou clique para selecionar</strong>
-                    <span>Imagens, PDF, Excel ou Word — até 10 MB</span>
+                    <div className="evidences-location-card">
+                      <span className="evidences-section-label">Localização</span>
+                      <div className="evidences-section-title">
+                        Capture o ponto da execução
+                      </div>
+                      <div className="evidences-section-description">
+                        A localização ajuda a reforçar a rastreabilidade da atividade e pode ser obrigatória conforme as regras da tarefa.
+                      </div>
 
-                    {selectedFile && (
-                      <small className="evidences-selected-file">
-                        Arquivo selecionado: {selectedFile.name}
-                      </small>
+                      <button
+                        type="button"
+                        className="evidences-secondary-button"
+                        onClick={handleCaptureLocation}
+                        disabled={capturingLocation}
+                      >
+                        <img
+                          src={confirmUploadIcon}
+                          alt=""
+                          className="evidences-submit-icon"
+                        />
+                        <span>
+                          {capturingLocation
+                            ? 'Capturando localização...'
+                            : capturedLocation.latitude !== null &&
+                              capturedLocation.longitude !== null
+                            ? 'Capturar novamente'
+                            : 'Capturar localização'}
+                        </span>
+                      </button>
+
+                      {capturedLocation.latitude !== null &&
+                      capturedLocation.longitude !== null ? (
+                        <div className="evidences-location-result">
+                          <div className="evidences-location-result-header">
+                            <span className="evidences-location-result-title">
+                              Localização capturada com sucesso
+                            </span>
+                            <span className="evidences-location-result-badge">
+                              Pronta para envio
+                            </span>
+                          </div>
+
+                          <div className="evidences-location-coordinates">
+                            <div className="evidences-location-coordinate-item">
+                              <strong>Latitude</strong>
+                              <span>
+                                {formatCoordinate(capturedLocation.latitude)}
+                              </span>
+                            </div>
+
+                            <div className="evidences-location-coordinate-item">
+                              <strong>Longitude</strong>
+                              <span>
+                                {formatCoordinate(capturedLocation.longitude)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="evidences-location-placeholder">
+                          <strong>Nenhuma localização capturada</strong>
+                          <span>
+                            Quando você capturar a localização, as coordenadas aparecerão aqui de forma organizada antes do envio.
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {submissionContextualError && (
+                      <div
+                        ref={submitFeedbackRef}
+                        className="evidences-feedback error"
+                        style={{ marginBottom: 0 }}
+                      >
+                        <strong style={{ display: 'block', marginBottom: 6 }}>
+                          Não foi possível enviar a evidência agora.
+                        </strong>
+                        <span>{submissionContextualError}</span>
+                      </div>
                     )}
-                  </label>
-
-                  <div className="evidences-field">
-                    <label htmlFor="observacao">Observação</label>
-                    <textarea
-                      id="observacao"
-                      rows="4"
-                      placeholder="Adicione uma observação sobre esta evidência..."
-                      value={note}
-                      onChange={(event) => setNote(event.target.value)}
-                    />
-                  </div>
-
-                  <div className="evidences-field">
-                    <label>Localização</label>
 
                     <button
                       type="button"
                       className="evidences-submit-button"
-                      onClick={handleCaptureLocation}
-                      disabled={capturingLocation}
-                      style={{ maxWidth: 260 }}
+                      onClick={handleSubmitEvidence}
+                      disabled={sendingEvidence}
                     >
                       <img
                         src={confirmUploadIcon}
@@ -461,59 +798,11 @@ function Evidences() {
                         className="evidences-submit-icon"
                       />
                       <span>
-                        {capturingLocation
-                          ? 'Capturando...'
-                          : 'Capturar localização'}
+                        {sendingEvidence ? 'Enviando...' : 'Confirmar envio'}
                       </span>
                     </button>
-
-                    {capturedLocation.latitude !== null &&
-                      capturedLocation.longitude !== null && (
-                        <div
-                          style={{
-                            marginTop: 12,
-                            padding: '12px 14px',
-                            borderRadius: 14,
-                            background: '#f8fafc',
-                            border: '1px solid #e5e7eb',
-                            color: '#475467',
-                            fontSize: 14,
-                            lineHeight: 1.6,
-                          }}
-                        >
-                          Local capturado: {capturedLocation.latitude.toFixed(6)} /{' '}
-                          {capturedLocation.longitude.toFixed(6)}
-                        </div>
-                      )}
                   </div>
-
-                  <button
-                    type="button"
-                    className="evidences-submit-button"
-                    onClick={handleSubmitEvidence}
-                    disabled={sendingEvidence}
-                  >
-                    <img
-                      src={confirmUploadIcon}
-                      alt=""
-                      className="evidences-submit-icon"
-                    />
-                    <span>
-                      {sendingEvidence ? 'Enviando...' : 'Confirmar envio'}
-                    </span>
-                  </button>
                 </div>
-              </section>
-
-              <section className="evidences-tips-card">
-                <h3>Boas práticas para evidências</h3>
-
-                <ul className="evidences-tips-list">
-                  <li>Fotografe antes, durante e após a operação</li>
-                  <li>Garanta boa iluminação e enquadramento</li>
-                  <li>Inclua observações descritivas e detalhadas</li>
-                  <li>Envie documentos relevantes como notas e receituários</li>
-                </ul>
               </section>
 
               <section className="evidences-card evidences-sent-card">
@@ -575,14 +864,15 @@ function Evidences() {
 
                             <p>{item.note || 'Sem observação informada.'}</p>
 
-                            {(item.latitude !== null &&
+                            {item.latitude !== null &&
                               item.latitude !== undefined &&
                               item.longitude !== null &&
-                              item.longitude !== undefined) && (
-                              <p style={{ marginTop: 6 }}>
-                                Localização: {item.latitude.toFixed(6)} / {item.longitude.toFixed(6)}
-                              </p>
-                            )}
+                              item.longitude !== undefined && (
+                                <p style={{ marginTop: 6 }}>
+                                  Localização: {formatCoordinate(item.latitude)} /{' '}
+                                  {formatCoordinate(item.longitude)}
+                                </p>
+                              )}
 
                             <span className="evidences-file-preview-hint">
                               Clique para visualizar

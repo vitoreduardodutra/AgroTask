@@ -436,6 +436,7 @@
   border-radius: 22px;
   overflow: hidden;
   margin-bottom: 22px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.03);
 }
 
 .edit-task-card-header {
@@ -539,6 +540,50 @@
   background: #f8fafc;
 }
 
+.edit-task-field input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #0f9d46;
+  flex-shrink: 0;
+}
+
+.edit-task-card:last-of-type .edit-task-card-header {
+  background: linear-gradient(180deg, #fcfefd 0%, #f8fbf9 100%);
+}
+
+.edit-task-card:last-of-type .edit-task-card-header h3 {
+  color: #1f2937;
+}
+
+.edit-task-card:last-of-type .edit-task-card-body {
+  gap: 14px;
+}
+
+.edit-task-card:last-of-type .edit-task-field {
+  padding: 14px 16px;
+  border: 1px solid #e7edf4;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.edit-task-card:last-of-type .edit-task-field:hover {
+  border-color: #d9e4dc;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+  transform: translateY(-1px);
+}
+
+.edit-task-card:last-of-type .edit-task-field label {
+  font-weight: 500;
+  color: #1f2937;
+}
+
+.edit-task-card:last-of-type .edit-task-field label span {
+  color: #475467;
+  line-height: 1.55;
+}
 .edit-task-save-button:disabled {
   opacity: 0.7;
   cursor: not-allowed;
@@ -718,6 +763,8 @@
 
 .edit-task-cancel-button:hover {
   background: #f8fafc;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+  transform: translateY(-1px);
 }
 
 .edit-task-save-button {
@@ -729,6 +776,8 @@
 
 .edit-task-save-button:hover:not(:disabled) {
   background: #089437;
+  box-shadow: 0 10px 24px rgba(9, 166, 61, 0.18);
+  transform: translateY(-1px);
 }
 
 .edit-task-save-icon {

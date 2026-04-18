@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const prisma = require('../config/prisma');
+
+const APP_TIME_ZONE = 'America/Sao_Paulo';
 const {
   createAssignedNotification,
   createCompletionReviewPendingNotifications,
@@ -14,7 +16,9 @@ function formatDate(date) {
     return '--/--/----';
   }
 
-  return new Intl.DateTimeFormat('pt-BR').format(new Date(date));
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: APP_TIME_ZONE,
+  }).format(new Date(date));
 }
 
 function formatDateLong(date) {
@@ -23,6 +27,7 @@ function formatDateLong(date) {
   }
 
   return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: APP_TIME_ZONE,
     weekday: 'long',
     day: '2-digit',
     month: 'long',
@@ -36,11 +41,13 @@ function formatDateTime(date) {
   }
 
   return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: APP_TIME_ZONE,
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    hour12: false,
   }).format(new Date(date));
 }
 
@@ -108,6 +115,26 @@ function getInitials(name) {
 
 function getAreaLabel(task) {
   return task.area || task.description || 'Sem área informada';
+}
+
+function normalizeEvidenceFileName(fileName) {
+  const normalizedValue = String(fileName || '').trim();
+
+  if (!normalizedValue) {
+    return 'arquivo';
+  }
+
+  try {
+    if (/[ÃÂ]/.test(normalizedValue)) {
+      return Buffer.from(normalizedValue, 'latin1')
+        .toString('utf8')
+        .normalize('NFC');
+    }
+  } catch (error) {
+    return normalizedValue.normalize('NFC');
+  }
+
+  return normalizedValue.normalize('NFC');
 }
 
 function parseBooleanValue(value) {
@@ -317,7 +344,7 @@ function buildTaskResponse(task) {
     },
     evidences: (task.evidences || []).map((evidence) => ({
       id: evidence.id,
-      fileName: evidence.fileName,
+      fileName: normalizeEvidenceFileName(evidence.fileName),
       filePath: evidence.filePath,
       fileType: evidence.fileType,
       note: evidence.note,
@@ -1564,7 +1591,7 @@ async function uploadTaskEvidence(req, res) {
 
     const evidence = await prisma.evidence.create({
       data: {
-        fileName: req.file.originalname,
+        fileName: normalizeEvidenceFileName(req.file.originalname),
         filePath: relativeFilePath,
         fileType: req.file.mimetype,
         note: note || null,
@@ -1577,7 +1604,8 @@ async function uploadTaskEvidence(req, res) {
     const authenticatedUserId = getAuthenticatedUserId(req);
 
     if (authenticatedUserId) {
-      const historyParts = [`Evidência enviada: ${req.file.originalname}`];
+      const normalizedOriginalName = normalizeEvidenceFileName(req.file.originalname);
+      const historyParts = [`Evidência enviada: ${normalizedOriginalName}`];
 
       if (note) {
         historyParts.push('com observação');
@@ -1600,7 +1628,7 @@ async function uploadTaskEvidence(req, res) {
       message: 'Evidência enviada com sucesso.',
       evidence: {
         id: evidence.id,
-        fileName: evidence.fileName,
+        fileName: normalizeEvidenceFileName(evidence.fileName),
         filePath: evidence.filePath,
         fileType: evidence.fileType,
         note: evidence.note,
@@ -1703,7 +1731,7 @@ async function deleteTaskEvidence(req, res) {
     if (authenticatedUserId) {
       await prisma.history.create({
         data: {
-          action: `Evidência removida: ${evidence.fileName}`,
+          action: `Evidência removida: ${normalizeEvidenceFileName(evidence.fileName)}`,
           taskId,
           userId: authenticatedUserId,
         },
