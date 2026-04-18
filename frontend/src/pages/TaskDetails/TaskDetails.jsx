@@ -45,6 +45,7 @@ function TaskDetails() {
   const [previewEvidence, setPreviewEvidence] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [downloadingEvidenceId, setDownloadingEvidenceId] = useState(null);
+  const [reviewingCompletion, setReviewingCompletion] = useState(false);
   const [connectivity, setConnectivity] = useState(getConnectivitySnapshot());
   const [showOfflineCacheMessage, setShowOfflineCacheMessage] = useState(false);
   const [offlineCacheTimestamp, setOfflineCacheTimestamp] = useState('');
@@ -400,6 +401,75 @@ function TaskDetails() {
     };
   }, []);
 
+  const handleApproveCompletion = async () => {
+    try {
+      setReviewingCompletion(true);
+      setErrorMessage('');
+      setSuccessFeedbackMessage('');
+
+      const response = await api.post(`/tasks/${id}/review-completion`, {
+        decision: 'APPROVE',
+      });
+
+      setSuccessFeedbackMessage(
+        response.data.message || 'Conclusão aprovada com sucesso.'
+      );
+
+      await loadTaskDetails();
+    } catch (error) {
+      const message =
+        error.response?.data?.message ||
+        'Não foi possível aprovar a conclusão da tarefa.';
+      setErrorMessage(message);
+    } finally {
+      setReviewingCompletion(false);
+    }
+  };
+
+  const handleRejectCompletion = async () => {
+    const reason = window.prompt(
+      'Informe o motivo da devolução para ajuste:'
+    );
+
+    if (reason === null) {
+      return;
+    }
+
+    if (!reason.trim()) {
+      setErrorMessage('Informe um motivo para devolver a conclusão.');
+      return;
+    }
+
+    try {
+      setReviewingCompletion(true);
+      setErrorMessage('');
+      setSuccessFeedbackMessage('');
+
+      const response = await api.post(`/tasks/${id}/review-completion`, {
+        decision: 'REJECT',
+        reason: reason.trim(),
+      });
+
+      setSuccessFeedbackMessage(
+        response.data.message || 'Conclusão devolvida para ajuste com sucesso.'
+      );
+
+      await loadTaskDetails();
+    } catch (error) {
+      const message =
+        error.response?.data?.message ||
+        'Não foi possível devolver a conclusão para ajuste.';
+      setErrorMessage(message);
+    } finally {
+      setReviewingCompletion(false);
+    }
+  };
+
+  const hasEvidenceRequirements =
+    task?.requirePhotoEvidence ||
+    task?.requireNoteEvidence ||
+    task?.requireLocationEvidence;
+
   return (
     <AppShell title="Detalhes da Tarefa" pageClassName="task-details-page">
       <div className="task-details-shell">
@@ -524,7 +594,103 @@ function TaskDetails() {
                   <span className="task-details-info-label">DESCRIÇÃO</span>
                   <p>{task.description}</p>
                 </div>
+
+                {(task.completionRequiresApproval || hasEvidenceRequirements) && (
+                  <div
+                    style={{
+                      marginTop: 22,
+                      paddingTop: 22,
+                      borderTop: '1px solid #edf1f6',
+                    }}
+                  >
+                    <span className="task-details-info-label">REGRAS DE VALIDAÇÃO</span>
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 10,
+                        color: '#475467',
+                        fontSize: 15,
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      <span>
+                        {task.completionRequiresApproval
+                          ? 'A conclusão desta tarefa exige aprovação do administrador.'
+                          : 'A conclusão desta tarefa não exige aprovação adicional.'}
+                      </span>
+
+                      {hasEvidenceRequirements ? (
+                        <span>
+                          Evidências obrigatórias:{' '}
+                          {task.evidenceRequirements.join(', ')}.
+                        </span>
+                      ) : (
+                        <span>Não há exigências específicas de evidência para a conclusão.</span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </section>
+
+              {task.completionRequiresApproval && (
+                <section className="task-details-card">
+                  <h3>Validação da conclusão</h3>
+
+                  <div className="task-details-empty-state" style={{ paddingTop: 0 }}>
+                    Status da validação: <strong>{task.completionReviewStatusLabel}</strong>
+                  </div>
+
+                  {task.completionReviewedByName && (
+                    <div className="task-details-empty-state">
+                      Revisado por {task.completionReviewedByName} em {task.completionReviewedAtFull}.
+                    </div>
+                  )}
+
+                  {task.completionRejectionReason && (
+                    <div className="task-details-feedback error" style={{ marginTop: 16, marginBottom: 0 }}>
+                      Motivo da devolução: {task.completionRejectionReason}
+                    </div>
+                  )}
+
+                  {task.canReviewCompletion && isAdmin && (
+                    <div className="task-details-actions" style={{ marginTop: 18 }}>
+                      <button
+                        type="button"
+                        className="task-details-action-item"
+                        onClick={handleApproveCompletion}
+                        disabled={reviewingCompletion}
+                        style={{
+                          border: 'none',
+                          cursor: reviewingCompletion ? 'not-allowed' : 'pointer',
+                          background: '#ecfdf3',
+                          color: '#166534',
+                        }}
+                      >
+                        <span>
+                          {reviewingCompletion ? 'Processando...' : 'Aprovar conclusão'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="task-details-action-item"
+                        onClick={handleRejectCompletion}
+                        disabled={reviewingCompletion}
+                        style={{
+                          border: 'none',
+                          cursor: reviewingCompletion ? 'not-allowed' : 'pointer',
+                          background: '#fef2f2',
+                          color: '#b91c1c',
+                        }}
+                      >
+                        <span>Devolver para ajuste</span>
+                      </button>
+                    </div>
+                  )}
+                </section>
+              )}
 
               <section className="task-details-card">
                 <div className="task-details-section-header">

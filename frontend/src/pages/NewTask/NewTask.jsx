@@ -23,6 +23,10 @@ function NewTask() {
     deadline: '',
     priority: 'MEDIUM',
     status: 'PENDING',
+    completionRequiresApproval: false,
+    requirePhotoEvidence: false,
+    requireNoteEvidence: false,
+    requireLocationEvidence: false,
   });
 
   const handleLogout = () => {
@@ -93,6 +97,10 @@ function NewTask() {
         deadline: formData.deadline,
         priority: formData.priority,
         status: formData.status,
+        completionRequiresApproval: formData.completionRequiresApproval,
+        requirePhotoEvidence: formData.requirePhotoEvidence,
+        requireNoteEvidence: formData.requireNoteEvidence,
+        requireLocationEvidence: formData.requireLocationEvidence,
       });
 
       setSuccessMessage(response.data.message || 'Tarefa criada com sucesso.');
@@ -349,6 +357,84 @@ function NewTask() {
                       </button>
                     </div>
                   </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="new-task-card">
+              <div className="new-task-card-header">
+                <h3>VALIDAÇÃO DA CONCLUSÃO</h3>
+              </div>
+
+              <div className="new-task-card-body">
+                <div className="new-task-field">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.completionRequiresApproval}
+                      onChange={(event) =>
+                        handleChange('completionRequiresApproval', event.target.checked)
+                      }
+                      style={{ width: 18, height: 18 }}
+                    />
+                    <span>Exigir aprovação do administrador quando a tarefa for concluída</span>
+                  </label>
+                </div>
+
+                <div className="new-task-field">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.requirePhotoEvidence}
+                      onChange={(event) =>
+                        handleChange('requirePhotoEvidence', event.target.checked)
+                      }
+                      style={{ width: 18, height: 18 }}
+                    />
+                    <span>Exigir pelo menos uma evidência com foto</span>
+                  </label>
+                </div>
+
+                <div className="new-task-field">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.requireNoteEvidence}
+                      onChange={(event) =>
+                        handleChange('requireNoteEvidence', event.target.checked)
+                      }
+                      style={{ width: 18, height: 18 }}
+                    />
+                    <span>Exigir pelo menos uma evidência com observação</span>
+                  </label>
+                </div>
+
+                <div className="new-task-field">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.requireLocationEvidence}
+                      onChange={(event) =>
+                        handleChange('requireLocationEvidence', event.target.checked)
+                      }
+                      style={{ width: 18, height: 18 }}
+                    />
+                    <span>Exigir pelo menos uma evidência com localização</span>
+                  </label>
+                </div>
+
+                <div
+                  style={{
+                    padding: '14px 16px',
+                    borderRadius: 16,
+                    background: '#f8fafc',
+                    border: '1px solid #e5e7eb',
+                    color: '#667085',
+                    fontSize: 14,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  Essas regras serão verificadas antes da conclusão da tarefa.
                 </div>
               </div>
             </section>

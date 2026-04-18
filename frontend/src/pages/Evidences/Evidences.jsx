@@ -20,6 +20,11 @@ function Evidences() {
   const [sendingEvidence, setSendingEvidence] = useState(false);
   const [deletingEvidenceId, setDeletingEvidenceId] = useState(null);
   const [downloadingEvidenceId, setDownloadingEvidenceId] = useState(null);
+  const [capturingLocation, setCapturingLocation] = useState(false);
+  const [capturedLocation, setCapturedLocation] = useState({
+    latitude: null,
+    longitude: null,
+  });
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [previewEvidence, setPreviewEvidence] = useState(null);
@@ -87,10 +92,100 @@ function Evidences() {
     setSelectedFile(file);
   };
 
+  const handleCaptureLocation = () => {
+    if (!navigator.geolocation) {
+      setErrorMessage('Geolocalização não suportada neste dispositivo.');
+      return;
+    }
+
+    setCapturingLocation(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setCapturedLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+        setCapturingLocation(false);
+      },
+      () => {
+        setCapturingLocation(false);
+        setErrorMessage(
+          'Não foi possível capturar a localização atual. Verifique a permissão do navegador.'
+        );
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+      }
+    );
+  };
+
+  const hasExistingPhotoEvidence = useMemo(() => {
+    return task?.evidences?.some((item) =>
+      String(item.fileType || '').toLowerCase().startsWith('image/')
+    );
+  }, [task]);
+
+  const hasExistingNoteEvidence = useMemo(() => {
+    return task?.evidences?.some((item) => String(item.note || '').trim());
+  }, [task]);
+
+  const hasExistingLocationEvidence = useMemo(() => {
+    return task?.evidences?.some(
+      (item) =>
+        item.latitude !== null &&
+        item.latitude !== undefined &&
+        item.longitude !== null &&
+        item.longitude !== undefined
+    );
+  }, [task]);
+
   const handleSubmitEvidence = async () => {
     try {
       if (!selectedFile) {
         setErrorMessage('Selecione um arquivo antes de confirmar o envio.');
+        setSuccessMessage('');
+        return;
+      }
+
+      if (
+        task?.requirePhotoEvidence &&
+        !hasExistingPhotoEvidence &&
+        !String(selectedFile.type || '').toLowerCase().startsWith('image/')
+      ) {
+        setErrorMessage(
+          'Esta tarefa exige pelo menos uma evidência com foto. Selecione uma imagem.'
+        );
+        setSuccessMessage('');
+        return;
+      }
+
+      if (
+        task?.requireNoteEvidence &&
+        !hasExistingNoteEvidence &&
+        !String(note || '').trim()
+      ) {
+        setErrorMessage(
+          'Esta tarefa exige pelo menos uma evidência com observação. Preencha a observação para continuar.'
+        );
+        setSuccessMessage('');
+        return;
+      }
+
+      if (
+        task?.requireLocationEvidence &&
+        !hasExistingLocationEvidence &&
+        (
+          capturedLocation.latitude === null ||
+          capturedLocation.longitude === null
+        )
+      ) {
+        setErrorMessage(
+          'Esta tarefa exige pelo menos uma evidência com localização. Capture a localização antes de enviar.'
+        );
         setSuccessMessage('');
         return;
       }
@@ -103,6 +198,14 @@ function Evidences() {
       formData.append('file', selectedFile);
       formData.append('note', note);
 
+      if (
+        capturedLocation.latitude !== null &&
+        capturedLocation.longitude !== null
+      ) {
+        formData.append('latitude', String(capturedLocation.latitude));
+        formData.append('longitude', String(capturedLocation.longitude));
+      }
+
       const response = await api.post(`/tasks/${id}/evidences`, formData);
 
       setSuccessMessage(
@@ -110,6 +213,10 @@ function Evidences() {
       );
       setSelectedFile(null);
       setNote('');
+      setCapturedLocation({
+        latitude: null,
+        longitude: null,
+      });
 
       const fileInput = document.getElementById('arquivo');
       if (fileInput) {
@@ -272,6 +379,29 @@ function Evidences() {
             </div>
           ) : (
             <>
+              <section className="evidences-tips-card">
+                <h3>Regras desta tarefa</h3>
+
+                <ul className="evidences-tips-list">
+                  <li>
+                    Aprovação de conclusão:{' '}
+                    {task?.completionRequiresApproval ? 'obrigatória' : 'não obrigatória'}
+                  </li>
+                  <li>
+                    Evidência com foto:{' '}
+                    {task?.requirePhotoEvidence ? 'obrigatória' : 'não obrigatória'}
+                  </li>
+                  <li>
+                    Evidência com observação:{' '}
+                    {task?.requireNoteEvidence ? 'obrigatória' : 'não obrigatória'}
+                  </li>
+                  <li>
+                    Evidência com localização:{' '}
+                    {task?.requireLocationEvidence ? 'obrigatória' : 'não obrigatória'}
+                  </li>
+                </ul>
+              </section>
+
               <section className="evidences-card">
                 <div className="evidences-card-header">
                   <h3>Enviar evidência</h3>
@@ -309,10 +439,52 @@ function Evidences() {
                     <textarea
                       id="observacao"
                       rows="4"
-                      placeholder="Adicione uma observação sobre esta evidência (opcional)..."
+                      placeholder="Adicione uma observação sobre esta evidência..."
                       value={note}
                       onChange={(event) => setNote(event.target.value)}
                     />
+                  </div>
+
+                  <div className="evidences-field">
+                    <label>Localização</label>
+
+                    <button
+                      type="button"
+                      className="evidences-submit-button"
+                      onClick={handleCaptureLocation}
+                      disabled={capturingLocation}
+                      style={{ maxWidth: 260 }}
+                    >
+                      <img
+                        src={confirmUploadIcon}
+                        alt=""
+                        className="evidences-submit-icon"
+                      />
+                      <span>
+                        {capturingLocation
+                          ? 'Capturando...'
+                          : 'Capturar localização'}
+                      </span>
+                    </button>
+
+                    {capturedLocation.latitude !== null &&
+                      capturedLocation.longitude !== null && (
+                        <div
+                          style={{
+                            marginTop: 12,
+                            padding: '12px 14px',
+                            borderRadius: 14,
+                            background: '#f8fafc',
+                            border: '1px solid #e5e7eb',
+                            color: '#475467',
+                            fontSize: 14,
+                            lineHeight: 1.6,
+                          }}
+                        >
+                          Local capturado: {capturedLocation.latitude.toFixed(6)} /{' '}
+                          {capturedLocation.longitude.toFixed(6)}
+                        </div>
+                      )}
                   </div>
 
                   <button
@@ -402,6 +574,15 @@ function Evidences() {
                             </div>
 
                             <p>{item.note || 'Sem observação informada.'}</p>
+
+                            {(item.latitude !== null &&
+                              item.latitude !== undefined &&
+                              item.longitude !== null &&
+                              item.longitude !== undefined) && (
+                              <p style={{ marginTop: 6 }}>
+                                Localização: {item.latitude.toFixed(6)} / {item.longitude.toFixed(6)}
+                              </p>
+                            )}
 
                             <span className="evidences-file-preview-hint">
                               Clique para visualizar

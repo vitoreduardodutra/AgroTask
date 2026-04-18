@@ -187,27 +187,25 @@ async function syncNotificationsForUser({ userId, farmId, role }) {
   }
 }
 
-async function createAssignedNotification({
+async function upsertNotification({
   userId,
   farmId,
   taskId,
-  taskTitle,
+  type,
+  title,
+  message,
 }) {
   const existingNotification = await prisma.notification.findFirst({
     where: {
       userId,
       farmId,
       taskId,
-      type: 'TASK_ASSIGNED',
+      type,
     },
     select: {
       id: true,
-      isRead: true,
     },
   });
-
-  const title = 'Nova tarefa atribuída';
-  const message = `Você recebeu a tarefa "${taskTitle}".`;
 
   if (!existingNotification) {
     return prisma.notification.create({
@@ -215,7 +213,7 @@ async function createAssignedNotification({
         userId,
         farmId,
         taskId,
-        type: 'TASK_ASSIGNED',
+        type,
         title,
         message,
         isRead: false,
@@ -236,6 +234,115 @@ async function createAssignedNotification({
   });
 }
 
+async function createAssignedNotification({
+  userId,
+  farmId,
+  taskId,
+  taskTitle,
+}) {
+  const title = 'Nova tarefa atribuída';
+  const message = `Você recebeu a tarefa "${taskTitle}".`;
+
+  return upsertNotification({
+    userId,
+    farmId,
+    taskId,
+    type: 'TASK_ASSIGNED',
+    title,
+    message,
+  });
+}
+
+async function createCompletionReviewPendingNotifications({
+  farmId,
+  taskId,
+  taskTitle,
+  responsibleName,
+}) {
+  const admins = await prisma.user.findMany({
+    where: {
+      status: 'ACTIVE',
+      memberships: {
+        some: {
+          farmId,
+          role: 'ADMIN',
+          status: 'ACTIVE',
+        },
+      },
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  const title = 'Conclusão aguardando aprovação';
+  const message = `A tarefa "${taskTitle}" foi concluída por ${responsibleName} e aguarda aprovação.`;
+
+  await Promise.all(
+    admins.map((admin) =>
+      upsertNotification({
+        userId: admin.id,
+        farmId,
+        taskId,
+        type: 'TASK_COMPLETION_REVIEW_PENDING',
+        title,
+        message,
+      })
+    )
+  );
+}
+
+async function clearTaskCompletionPendingNotifications({ farmId, taskId }) {
+  await prisma.notification.deleteMany({
+    where: {
+      farmId,
+      taskId,
+      type: 'TASK_COMPLETION_REVIEW_PENDING',
+    },
+  });
+}
+
+async function createCompletionApprovedNotification({
+  userId,
+  farmId,
+  taskId,
+  taskTitle,
+}) {
+  const title = 'Conclusão aprovada';
+  const message = `A conclusão da tarefa "${taskTitle}" foi aprovada pelo administrador.`;
+
+  return upsertNotification({
+    userId,
+    farmId,
+    taskId,
+    type: 'TASK_COMPLETION_APPROVED',
+    title,
+    message,
+  });
+}
+
+async function createCompletionRejectedNotification({
+  userId,
+  farmId,
+  taskId,
+  taskTitle,
+  reason,
+}) {
+  const title = 'Conclusão devolvida para ajuste';
+  const message = reason
+    ? `A conclusão da tarefa "${taskTitle}" foi devolvida. Motivo: ${reason}`
+    : `A conclusão da tarefa "${taskTitle}" foi devolvida para ajuste.`;
+
+  return upsertNotification({
+    userId,
+    farmId,
+    taskId,
+    type: 'TASK_COMPLETION_REJECTED',
+    title,
+    message,
+  });
+}
+
 async function getUnreadCount({ userId, farmId }) {
   return prisma.notification.count({
     where: {
@@ -249,5 +356,9 @@ async function getUnreadCount({ userId, farmId }) {
 module.exports = {
   syncNotificationsForUser,
   createAssignedNotification,
+  createCompletionReviewPendingNotifications,
+  clearTaskCompletionPendingNotifications,
+  createCompletionApprovedNotification,
+  createCompletionRejectedNotification,
   getUnreadCount,
 };

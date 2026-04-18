@@ -1,7 +1,13 @@
 const fs = require('fs');
 const path = require('path');
 const prisma = require('../config/prisma');
-const { createAssignedNotification } = require('../services/notificationService');
+const {
+  createAssignedNotification,
+  createCompletionReviewPendingNotifications,
+  clearTaskCompletionPendingNotifications,
+  createCompletionApprovedNotification,
+  createCompletionRejectedNotification,
+} = require('../services/notificationService');
 
 function formatDate(date) {
   if (!date) {
@@ -59,6 +65,17 @@ function mapStatus(status) {
   return statuses[status] || status;
 }
 
+function mapCompletionReviewStatus(status) {
+  const labels = {
+    NOT_REQUIRED: 'Não aplicável',
+    PENDING: 'Aguardando aprovação',
+    APPROVED: 'Aprovada',
+    REJECTED: 'Devolvida para ajuste',
+  };
+
+  return labels[status] || status;
+}
+
 function getPriorityClass(priority) {
   const classes = {
     LOW: 'low',
@@ -93,6 +110,24 @@ function getAreaLabel(task) {
   return task.area || task.description || 'Sem área informada';
 }
 
+function parseBooleanValue(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  const normalized = String(value ?? '').trim().toLowerCase();
+
+  if (['true', '1', 'yes', 'sim', 'on'].includes(normalized)) {
+    return true;
+  }
+
+  if (['false', '0', 'no', 'não', 'nao', 'off', ''].includes(normalized)) {
+    return false;
+  }
+
+  return Boolean(value);
+}
+
 function getAuthenticatedUserId(req) {
   const possibleIds = [
     req.user?.id,
@@ -122,6 +157,116 @@ function isAdmin(req) {
   return req.user?.role === 'ADMIN';
 }
 
+function getEvidenceRequirements(task) {
+  return [
+    task.requirePhotoEvidence ? 'foto' : null,
+    task.requireNoteEvidence ? 'observação' : null,
+    task.requireLocationEvidence ? 'localização' : null,
+  ].filter(Boolean);
+}
+
+function getMissingEvidenceRequirements(task) {
+  const evidences = Array.isArray(task?.evidences) ? task.evidences : [];
+  const missing = [];
+
+  if (
+    task.requirePhotoEvidence &&
+    !evidences.some((evidence) =>
+      String(evidence.fileType || '').toLowerCase().startsWith('image/')
+    )
+  ) {
+    missing.push('foto');
+  }
+
+  if (
+    task.requireNoteEvidence &&
+    !evidences.some((evidence) => String(evidence.note || '').trim())
+  ) {
+    missing.push('observação');
+  }
+
+  if (
+    task.requireLocationEvidence &&
+    !evidences.some(
+      (evidence) =>
+        evidence.latitude !== null &&
+        evidence.latitude !== undefined &&
+        evidence.longitude !== null &&
+        evidence.longitude !== undefined
+    )
+  ) {
+    missing.push('localização');
+  }
+
+  return missing;
+}
+
+function buildMissingEvidenceRequirementsMessage(missingRequirements) {
+  if (!missingRequirements.length) {
+    return '';
+  }
+
+  if (missingRequirements.length === 1) {
+    return `Esta tarefa exige pelo menos uma evidência com ${missingRequirements[0]} antes da conclusão.`;
+  }
+
+  const lastRequirement = missingRequirements[missingRequirements.length - 1];
+  const firstPart = missingRequirements.slice(0, -1).join(', ');
+
+  return `Esta tarefa exige evidências com ${firstPart} e ${lastRequirement} antes da conclusão.`;
+}
+
+function buildTaskReviewData({
+  existingTask = null,
+  nextStatus,
+  completionRequiresApproval,
+  actorIsAdmin,
+  reviewerId,
+}) {
+  if (!completionRequiresApproval) {
+    return {
+      completionReviewStatus: 'NOT_REQUIRED',
+      completionReviewedAt: null,
+      completionReviewedById: null,
+      completionRejectionReason: null,
+    };
+  }
+
+  if (nextStatus !== 'COMPLETED') {
+    if (existingTask?.completionReviewStatus === 'REJECTED') {
+      return {
+        completionReviewStatus: 'REJECTED',
+        completionReviewedAt: existingTask.completionReviewedAt || null,
+        completionReviewedById: existingTask.completionReviewedById || null,
+        completionRejectionReason: existingTask.completionRejectionReason || null,
+      };
+    }
+
+    return {
+      completionReviewStatus: 'NOT_REQUIRED',
+      completionReviewedAt: null,
+      completionReviewedById: null,
+      completionRejectionReason: null,
+    };
+  }
+
+  if (actorIsAdmin) {
+    return {
+      completionReviewStatus: 'APPROVED',
+      completionReviewedAt: new Date(),
+      completionReviewedById: reviewerId || null,
+      completionRejectionReason: null,
+    };
+  }
+
+  return {
+    completionReviewStatus: 'PENDING',
+    completionReviewedAt: null,
+    completionReviewedById: null,
+    completionRejectionReason: null,
+  };
+}
+
 function buildTaskResponse(task) {
   return {
     id: task.id,
@@ -142,6 +287,28 @@ function buildTaskResponse(task) {
     createdAt: formatDate(task.createdAt),
     createdAtFull: formatDateTime(task.createdAt),
     updatedAt: formatDateTime(task.updatedAt),
+
+    completionRequiresApproval: Boolean(task.completionRequiresApproval),
+    completionReviewStatus: task.completionReviewStatus,
+    completionReviewStatusLabel: mapCompletionReviewStatus(task.completionReviewStatus),
+    completionReviewedAt: task.completionReviewedAt
+      ? task.completionReviewedAt.toISOString()
+      : null,
+    completionReviewedAtFull: formatDateTime(task.completionReviewedAt),
+    completionReviewedById: task.completionReviewedBy?.id || null,
+    completionReviewedByName: task.completionReviewedBy?.name || '',
+    completionRejectionReason: task.completionRejectionReason || '',
+    canReviewCompletion:
+      Boolean(task.completionRequiresApproval) &&
+      task.completionReviewStatus === 'PENDING' &&
+      task.status === 'COMPLETED',
+
+    requirePhotoEvidence: Boolean(task.requirePhotoEvidence),
+    requireNoteEvidence: Boolean(task.requireNoteEvidence),
+    requireLocationEvidence: Boolean(task.requireLocationEvidence),
+    evidenceRequirements: getEvidenceRequirements(task),
+    missingEvidenceRequirements: getMissingEvidenceRequirements(task),
+
     responsible: {
       id: task.responsible?.id || null,
       name: task.responsible?.name || 'Sem responsável',
@@ -157,7 +324,7 @@ function buildTaskResponse(task) {
       latitude: evidence.latitude,
       longitude: evidence.longitude,
       createdAt: formatDateTime(evidence.createdAt),
-      authorName: evidence.task?.responsible?.name || 'Usuário',
+      authorName: task.responsible?.name || 'Usuário',
     })),
     histories: (task.histories || []).map((history) => ({
       id: history.id,
@@ -168,6 +335,40 @@ function buildTaskResponse(task) {
     })),
   };
 }
+
+const TASK_DETAILS_INCLUDE = {
+  responsible: {
+    select: {
+      id: true,
+      name: true,
+      status: true,
+    },
+  },
+  completionReviewedBy: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+  evidences: {
+    orderBy: {
+      createdAt: 'desc',
+    },
+  },
+  histories: {
+    orderBy: {
+      createdAt: 'desc',
+    },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+  },
+};
 
 async function findResponsibleInSameFarm(responsibleId, farmId) {
   return prisma.user.findFirst({
@@ -203,7 +404,24 @@ async function findTaskInUserFarm(taskId, farmId) {
           status: true,
         },
       },
+      completionReviewedBy: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      evidences: true,
     },
+  });
+}
+
+async function getFullTaskById(taskId, farmId) {
+  return prisma.task.findFirst({
+    where: {
+      id: taskId,
+      farmId,
+    },
+    include: TASK_DETAILS_INCLUDE,
   });
 }
 
@@ -299,9 +517,17 @@ async function listTasks(req, res) {
       priority: mapPriority(task.priority),
       priorityClass: getPriorityClass(task.priority),
       status: mapStatus(task.status),
+      statusValue: task.status,
       statusClass: getStatusClass(task.status),
       deadline: formatDate(task.deadline),
       deadlineHighlight: task.status === 'LATE',
+      completionRequiresApproval: Boolean(task.completionRequiresApproval),
+      completionReviewStatus: task.completionReviewStatus,
+      completionReviewStatusLabel: mapCompletionReviewStatus(task.completionReviewStatus),
+      hasPendingCompletionReview:
+        task.completionRequiresApproval &&
+        task.completionReviewStatus === 'PENDING' &&
+        task.status === 'COMPLETED',
     }));
 
     return res.status(200).json({
@@ -390,6 +616,7 @@ async function getTaskFormOptions(req, res) {
 async function createTask(req, res) {
   try {
     const farmId = getAuthenticatedFarmId(req);
+    const authenticatedUserId = getAuthenticatedUserId(req);
 
     if (!farmId) {
       return res.status(403).json({
@@ -405,6 +632,10 @@ async function createTask(req, res) {
       deadline,
       priority,
       status,
+      completionRequiresApproval,
+      requirePhotoEvidence,
+      requireNoteEvidence,
+      requireLocationEvidence,
     } = req.body;
 
     const normalizedTitle = String(title || '').trim();
@@ -414,6 +645,15 @@ async function createTask(req, res) {
     const normalizedStatus = String(status || '').trim().toUpperCase();
     const normalizedResponsibleId = Number(responsibleId);
     const normalizedDeadline = deadline ? new Date(deadline) : null;
+
+    const normalizedCompletionRequiresApproval = parseBooleanValue(
+      completionRequiresApproval
+    );
+    const normalizedRequirePhotoEvidence = parseBooleanValue(requirePhotoEvidence);
+    const normalizedRequireNoteEvidence = parseBooleanValue(requireNoteEvidence);
+    const normalizedRequireLocationEvidence = parseBooleanValue(
+      requireLocationEvidence
+    );
 
     const validPriorities = ['LOW', 'MEDIUM', 'HIGH'];
     const validStatuses = ['PENDING', 'IN_PROGRESS', 'COMPLETED', 'LATE'];
@@ -454,6 +694,18 @@ async function createTask(req, res) {
       });
     }
 
+    if (
+      normalizedStatus === 'COMPLETED' &&
+      (normalizedRequirePhotoEvidence ||
+        normalizedRequireNoteEvidence ||
+        normalizedRequireLocationEvidence)
+    ) {
+      return res.status(400).json({
+        message:
+          'Não é possível criar a tarefa já concluída quando ela exige evidências obrigatórias. Cadastre a tarefa e envie as evidências antes de concluí-la.',
+      });
+    }
+
     const responsibleUser = await findResponsibleInSameFarm(
       normalizedResponsibleId,
       farmId
@@ -466,6 +718,13 @@ async function createTask(req, res) {
       });
     }
 
+    const reviewData = buildTaskReviewData({
+      nextStatus: normalizedStatus,
+      completionRequiresApproval: normalizedCompletionRequiresApproval,
+      actorIsAdmin: true,
+      reviewerId: authenticatedUserId,
+    });
+
     const task = await prisma.task.create({
       data: {
         title: normalizedTitle,
@@ -476,6 +735,16 @@ async function createTask(req, res) {
         deadline: normalizedDeadline,
         priority: normalizedPriority,
         status: normalizedStatus,
+
+        completionRequiresApproval: normalizedCompletionRequiresApproval,
+        completionReviewStatus: reviewData.completionReviewStatus,
+        completionReviewedAt: reviewData.completionReviewedAt,
+        completionReviewedById: reviewData.completionReviewedById,
+        completionRejectionReason: reviewData.completionRejectionReason,
+
+        requirePhotoEvidence: normalizedRequirePhotoEvidence,
+        requireNoteEvidence: normalizedRequireNoteEvidence,
+        requireLocationEvidence: normalizedRequireLocationEvidence,
       },
       include: {
         responsible: {
@@ -487,15 +756,31 @@ async function createTask(req, res) {
       },
     });
 
-    const authenticatedUserId = getAuthenticatedUserId(req);
-
     if (authenticatedUserId) {
-      await prisma.history.create({
-        data: {
-          action: `Tarefa criada: ${task.title}`,
+      const historyActions = [`Tarefa criada: ${task.title}`];
+
+      if (normalizedCompletionRequiresApproval) {
+        historyActions.push('A tarefa foi configurada para exigir aprovação de conclusão');
+      }
+
+      if (normalizedRequirePhotoEvidence) {
+        historyActions.push('A tarefa foi configurada para exigir evidência com foto');
+      }
+
+      if (normalizedRequireNoteEvidence) {
+        historyActions.push('A tarefa foi configurada para exigir evidência com observação');
+      }
+
+      if (normalizedRequireLocationEvidence) {
+        historyActions.push('A tarefa foi configurada para exigir evidência com localização');
+      }
+
+      await prisma.history.createMany({
+        data: historyActions.map((action) => ({
+          action,
           taskId: task.id,
           userId: authenticatedUserId,
-        },
+        })),
       });
     }
 
@@ -519,6 +804,11 @@ async function createTask(req, res) {
         deadline: task.deadline,
         priority: task.priority,
         status: task.status,
+        completionRequiresApproval: task.completionRequiresApproval,
+        completionReviewStatus: task.completionReviewStatus,
+        requirePhotoEvidence: task.requirePhotoEvidence,
+        requireNoteEvidence: task.requireNoteEvidence,
+        requireLocationEvidence: task.requireLocationEvidence,
         createdAt: task.createdAt,
       },
     });
@@ -560,44 +850,7 @@ async function getTaskById(req, res) {
 
     const task = await prisma.task.findFirst({
       where,
-      include: {
-        responsible: {
-          select: {
-            id: true,
-            name: true,
-            status: true,
-          },
-        },
-        evidences: {
-          orderBy: {
-            createdAt: 'desc',
-          },
-          include: {
-            task: {
-              include: {
-                responsible: {
-                  select: {
-                    name: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-        histories: {
-          orderBy: {
-            createdAt: 'desc',
-          },
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-        },
-      },
+      include: TASK_DETAILS_INCLUDE,
     });
 
     if (!task) {
@@ -663,18 +916,53 @@ async function updateTask(req, res) {
         });
       }
 
+      if (normalizedStatus === 'COMPLETED') {
+        const missingRequirements = getMissingEvidenceRequirements(existingTask);
+
+        if (missingRequirements.length > 0) {
+          return res.status(400).json({
+            message: buildMissingEvidenceRequirementsMessage(missingRequirements),
+          });
+        }
+      }
+
+      const reviewData = buildTaskReviewData({
+        existingTask,
+        nextStatus: normalizedStatus,
+        completionRequiresApproval: existingTask.completionRequiresApproval,
+        actorIsAdmin: false,
+        reviewerId: null,
+      });
+
       await prisma.task.update({
         where: {
           id: taskId,
         },
         data: {
           status: normalizedStatus,
+          completionReviewStatus: reviewData.completionReviewStatus,
+          completionReviewedAt: reviewData.completionReviewedAt,
+          completionReviewedById: reviewData.completionReviewedById,
+          completionRejectionReason: reviewData.completionRejectionReason,
         },
       });
 
+      if (reviewData.completionReviewStatus === 'PENDING') {
+        await createCompletionReviewPendingNotifications({
+          farmId,
+          taskId,
+          taskTitle: existingTask.title,
+          responsibleName: req.user?.name || existingTask.responsible?.name || 'Usuário',
+        });
+      } else {
+        await clearTaskCompletionPendingNotifications({ farmId, taskId });
+      }
+
       if (authenticatedUserId) {
         const action =
-          existingTask.status !== normalizedStatus
+          reviewData.completionReviewStatus === 'PENDING'
+            ? 'Tarefa concluída e enviada para aprovação do administrador'
+            : existingTask.status !== normalizedStatus
             ? `Status alterado de ${mapStatus(existingTask.status)} para ${mapStatus(normalizedStatus)}`
             : 'Status da tarefa salvo sem alteração detectada';
 
@@ -687,53 +975,13 @@ async function updateTask(req, res) {
         });
       }
 
-      const refreshedTask = await prisma.task.findFirst({
-        where: {
-          id: taskId,
-          farmId,
-        },
-        include: {
-          responsible: {
-            select: {
-              id: true,
-              name: true,
-              status: true,
-            },
-          },
-          evidences: {
-            orderBy: {
-              createdAt: 'desc',
-            },
-            include: {
-              task: {
-                include: {
-                  responsible: {
-                    select: {
-                      name: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-          histories: {
-            orderBy: {
-              createdAt: 'desc',
-            },
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-        },
-      });
+      const refreshedTask = await getFullTaskById(taskId, farmId);
 
       return res.status(200).json({
-        message: 'Status da tarefa atualizado com sucesso.',
+        message:
+          reviewData.completionReviewStatus === 'PENDING'
+            ? 'Tarefa concluída e enviada para aprovação do administrador.'
+            : 'Status da tarefa atualizado com sucesso.',
         task: buildTaskResponse(refreshedTask),
       });
     }
@@ -746,6 +994,10 @@ async function updateTask(req, res) {
       deadline,
       priority,
       status,
+      completionRequiresApproval,
+      requirePhotoEvidence,
+      requireNoteEvidence,
+      requireLocationEvidence,
     } = req.body;
 
     const normalizedTitle = String(title || '').trim();
@@ -755,6 +1007,15 @@ async function updateTask(req, res) {
     const normalizedStatus = String(status || '').trim().toUpperCase();
     const normalizedResponsibleId = Number(responsibleId);
     const normalizedDeadline = deadline ? new Date(deadline) : null;
+
+    const normalizedCompletionRequiresApproval = parseBooleanValue(
+      completionRequiresApproval
+    );
+    const normalizedRequirePhotoEvidence = parseBooleanValue(requirePhotoEvidence);
+    const normalizedRequireNoteEvidence = parseBooleanValue(requireNoteEvidence);
+    const normalizedRequireLocationEvidence = parseBooleanValue(
+      requireLocationEvidence
+    );
 
     const validPriorities = ['LOW', 'MEDIUM', 'HIGH'];
     const validStatuses = ['PENDING', 'IN_PROGRESS', 'COMPLETED', 'LATE'];
@@ -807,6 +1068,33 @@ async function updateTask(req, res) {
       });
     }
 
+    const draftTaskForValidation = {
+      ...existingTask,
+      requirePhotoEvidence: normalizedRequirePhotoEvidence,
+      requireNoteEvidence: normalizedRequireNoteEvidence,
+      requireLocationEvidence: normalizedRequireLocationEvidence,
+    };
+
+    if (normalizedStatus === 'COMPLETED') {
+      const missingRequirements = getMissingEvidenceRequirements(
+        draftTaskForValidation
+      );
+
+      if (missingRequirements.length > 0) {
+        return res.status(400).json({
+          message: buildMissingEvidenceRequirementsMessage(missingRequirements),
+        });
+      }
+    }
+
+    const reviewData = buildTaskReviewData({
+      existingTask,
+      nextStatus: normalizedStatus,
+      completionRequiresApproval: normalizedCompletionRequiresApproval,
+      actorIsAdmin: true,
+      reviewerId: authenticatedUserId,
+    });
+
     await prisma.task.update({
       where: {
         id: taskId,
@@ -819,8 +1107,22 @@ async function updateTask(req, res) {
         deadline: normalizedDeadline,
         priority: normalizedPriority,
         status: normalizedStatus,
+
+        completionRequiresApproval: normalizedCompletionRequiresApproval,
+        completionReviewStatus: reviewData.completionReviewStatus,
+        completionReviewedAt: reviewData.completionReviewedAt,
+        completionReviewedById: reviewData.completionReviewedById,
+        completionRejectionReason: reviewData.completionRejectionReason,
+
+        requirePhotoEvidence: normalizedRequirePhotoEvidence,
+        requireNoteEvidence: normalizedRequireNoteEvidence,
+        requireLocationEvidence: normalizedRequireLocationEvidence,
       },
     });
+
+    if (reviewData.completionReviewStatus !== 'PENDING') {
+      await clearTaskCompletionPendingNotifications({ farmId, taskId });
+    }
 
     const historyChanges = [];
 
@@ -864,6 +1166,52 @@ async function updateTask(req, res) {
       );
     }
 
+    if (
+      Boolean(existingTask.completionRequiresApproval) !==
+      normalizedCompletionRequiresApproval
+    ) {
+      historyChanges.push(
+        normalizedCompletionRequiresApproval
+          ? 'A tarefa passou a exigir aprovação do administrador na conclusão'
+          : 'A tarefa deixou de exigir aprovação do administrador na conclusão'
+      );
+    }
+
+    if (Boolean(existingTask.requirePhotoEvidence) !== normalizedRequirePhotoEvidence) {
+      historyChanges.push(
+        normalizedRequirePhotoEvidence
+          ? 'A tarefa passou a exigir evidência com foto'
+          : 'A tarefa deixou de exigir evidência com foto'
+      );
+    }
+
+    if (Boolean(existingTask.requireNoteEvidence) !== normalizedRequireNoteEvidence) {
+      historyChanges.push(
+        normalizedRequireNoteEvidence
+          ? 'A tarefa passou a exigir evidência com observação'
+          : 'A tarefa deixou de exigir evidência com observação'
+      );
+    }
+
+    if (
+      Boolean(existingTask.requireLocationEvidence) !==
+      normalizedRequireLocationEvidence
+    ) {
+      historyChanges.push(
+        normalizedRequireLocationEvidence
+          ? 'A tarefa passou a exigir evidência com localização'
+          : 'A tarefa deixou de exigir evidência com localização'
+      );
+    }
+
+    if (
+      normalizedStatus === 'COMPLETED' &&
+      normalizedCompletionRequiresApproval &&
+      reviewData.completionReviewStatus === 'APPROVED'
+    ) {
+      historyChanges.push('Conclusão registrada como aprovada pelo administrador');
+    }
+
     if (historyChanges.length === 0) {
       historyChanges.push('Tarefa editada sem alterações detectadas');
     }
@@ -887,50 +1235,7 @@ async function updateTask(req, res) {
       });
     }
 
-    const refreshedTask = await prisma.task.findFirst({
-      where: {
-        id: taskId,
-        farmId,
-      },
-      include: {
-        responsible: {
-          select: {
-            id: true,
-            name: true,
-            status: true,
-          },
-        },
-        evidences: {
-          orderBy: {
-            createdAt: 'desc',
-          },
-          include: {
-            task: {
-              include: {
-                responsible: {
-                  select: {
-                    name: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-        histories: {
-          orderBy: {
-            createdAt: 'desc',
-          },
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-        },
-      },
-    });
+    const refreshedTask = await getFullTaskById(taskId, farmId);
 
     return res.status(200).json({
       message: 'Tarefa atualizada com sucesso.',
@@ -941,6 +1246,129 @@ async function updateTask(req, res) {
 
     return res.status(500).json({
       message: 'Erro interno ao atualizar tarefa.',
+    });
+  }
+}
+
+async function reviewTaskCompletion(req, res) {
+  try {
+    const taskId = Number(req.params.id);
+    const farmId = getAuthenticatedFarmId(req);
+    const authenticatedUserId = getAuthenticatedUserId(req);
+
+    if (!Number.isInteger(taskId) || taskId <= 0) {
+      return res.status(400).json({
+        message: 'ID da tarefa inválido.',
+      });
+    }
+
+    if (!farmId) {
+      return res.status(403).json({
+        message: 'Usuário sem fazenda vinculada.',
+      });
+    }
+
+    const { decision, reason } = req.body;
+
+    const normalizedDecision = String(decision || '').trim().toUpperCase();
+    const normalizedReason = String(reason || '').trim();
+
+    if (!['APPROVE', 'REJECT'].includes(normalizedDecision)) {
+      return res.status(400).json({
+        message: 'Decisão de revisão inválida.',
+      });
+    }
+
+    const task = await findTaskInUserFarm(taskId, farmId);
+
+    if (!task) {
+      return res.status(404).json({
+        message: 'Tarefa não encontrada.',
+      });
+    }
+
+    if (!task.completionRequiresApproval) {
+      return res.status(400).json({
+        message: 'Esta tarefa não exige aprovação de conclusão.',
+      });
+    }
+
+    if (task.completionReviewStatus !== 'PENDING' || task.status !== 'COMPLETED') {
+      return res.status(400).json({
+        message: 'Não existe uma conclusão pendente de aprovação para esta tarefa.',
+      });
+    }
+
+    if (normalizedDecision === 'REJECT' && !normalizedReason) {
+      return res.status(400).json({
+        message: 'Informe o motivo da devolução para ajuste.',
+      });
+    }
+
+    const nextStatus = normalizedDecision === 'APPROVE' ? 'COMPLETED' : 'IN_PROGRESS';
+    const nextReviewStatus =
+      normalizedDecision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+
+    await prisma.task.update({
+      where: {
+        id: taskId,
+      },
+      data: {
+        status: nextStatus,
+        completionReviewStatus: nextReviewStatus,
+        completionReviewedAt: new Date(),
+        completionReviewedById: authenticatedUserId || null,
+        completionRejectionReason:
+          normalizedDecision === 'REJECT' ? normalizedReason : null,
+      },
+    });
+
+    if (authenticatedUserId) {
+      await prisma.history.create({
+        data: {
+          action:
+            normalizedDecision === 'APPROVE'
+              ? 'Conclusão da tarefa aprovada pelo administrador'
+              : `Conclusão da tarefa devolvida para ajuste. Motivo: ${normalizedReason}`,
+          taskId,
+          userId: authenticatedUserId,
+        },
+      });
+    }
+
+    await clearTaskCompletionPendingNotifications({ farmId, taskId });
+
+    if (normalizedDecision === 'APPROVE') {
+      await createCompletionApprovedNotification({
+        userId: task.responsibleId,
+        farmId,
+        taskId,
+        taskTitle: task.title,
+      });
+    } else {
+      await createCompletionRejectedNotification({
+        userId: task.responsibleId,
+        farmId,
+        taskId,
+        taskTitle: task.title,
+        reason: normalizedReason,
+      });
+    }
+
+    const refreshedTask = await getFullTaskById(taskId, farmId);
+
+    return res.status(200).json({
+      message:
+        normalizedDecision === 'APPROVE'
+          ? 'Conclusão aprovada com sucesso.'
+          : 'Conclusão devolvida para ajuste com sucesso.',
+      task: buildTaskResponse(refreshedTask),
+    });
+  } catch (error) {
+    console.error('Erro ao revisar conclusão da tarefa:', error);
+
+    return res.status(500).json({
+      message: 'Erro interno ao revisar a conclusão da tarefa.',
     });
   }
 }
@@ -1149,9 +1577,19 @@ async function uploadTaskEvidence(req, res) {
     const authenticatedUserId = getAuthenticatedUserId(req);
 
     if (authenticatedUserId) {
+      const historyParts = [`Evidência enviada: ${req.file.originalname}`];
+
+      if (note) {
+        historyParts.push('com observação');
+      }
+
+      if (latitude !== null && longitude !== null) {
+        historyParts.push('com localização');
+      }
+
       await prisma.history.create({
         data: {
-          action: `Evidência enviada: ${req.file.originalname}`,
+          action: historyParts.join(' '),
           taskId,
           userId: authenticatedUserId,
         },
@@ -1290,6 +1728,7 @@ module.exports = {
   createTask,
   getTaskById,
   updateTask,
+  reviewTaskCompletion,
   deleteTask,
   uploadTaskEvidence,
   deleteTaskEvidence,

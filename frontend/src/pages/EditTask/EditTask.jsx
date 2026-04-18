@@ -50,6 +50,10 @@ function EditTask() {
     deadline: '',
     priority: 'MEDIUM',
     status: 'PENDING',
+    completionRequiresApproval: false,
+    requirePhotoEvidence: false,
+    requireNoteEvidence: false,
+    requireLocationEvidence: false,
   });
 
   const isOffline = !connectivity.isOnline;
@@ -109,6 +113,10 @@ function EditTask() {
       deadline: formatDateTimeLocal(task?.deadlineRaw || task?.deadlineIso || ''),
       priority: task?.priorityValue || 'MEDIUM',
       status: task?.statusValue || 'PENDING',
+      completionRequiresApproval: Boolean(task?.completionRequiresApproval),
+      requirePhotoEvidence: Boolean(task?.requirePhotoEvidence),
+      requireNoteEvidence: Boolean(task?.requireNoteEvidence),
+      requireLocationEvidence: Boolean(task?.requireLocationEvidence),
     }),
     []
   );
@@ -254,6 +262,10 @@ function EditTask() {
             deadline: formData.deadline,
             priority: formData.priority,
             status: formData.status,
+            completionRequiresApproval: formData.completionRequiresApproval,
+            requirePhotoEvidence: formData.requirePhotoEvidence,
+            requireNoteEvidence: formData.requireNoteEvidence,
+            requireLocationEvidence: formData.requireLocationEvidence,
           }
         : {
             status: formData.status,
@@ -599,6 +611,76 @@ function EditTask() {
                   </div>
                 </div>
               </section>
+
+              {isAdmin && (
+                <section className="edit-task-card">
+                  <div className="edit-task-card-header">
+                    <h3>VALIDAÇÃO DA CONCLUSÃO</h3>
+                  </div>
+
+                  <div className="edit-task-card-body">
+                    <div className="edit-task-field">
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <input
+                          type="checkbox"
+                          checked={formData.completionRequiresApproval}
+                          onChange={(event) =>
+                            handleChange('completionRequiresApproval', event.target.checked)
+                          }
+                          style={{ width: 18, height: 18 }}
+                          disabled={isAdminEditDisabled}
+                        />
+                        <span>Exigir aprovação do administrador quando a tarefa for concluída</span>
+                      </label>
+                    </div>
+
+                    <div className="edit-task-field">
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <input
+                          type="checkbox"
+                          checked={formData.requirePhotoEvidence}
+                          onChange={(event) =>
+                            handleChange('requirePhotoEvidence', event.target.checked)
+                          }
+                          style={{ width: 18, height: 18 }}
+                          disabled={isAdminEditDisabled}
+                        />
+                        <span>Exigir pelo menos uma evidência com foto</span>
+                      </label>
+                    </div>
+
+                    <div className="edit-task-field">
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <input
+                          type="checkbox"
+                          checked={formData.requireNoteEvidence}
+                          onChange={(event) =>
+                            handleChange('requireNoteEvidence', event.target.checked)
+                          }
+                          style={{ width: 18, height: 18 }}
+                          disabled={isAdminEditDisabled}
+                        />
+                        <span>Exigir pelo menos uma evidência com observação</span>
+                      </label>
+                    </div>
+
+                    <div className="edit-task-field">
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <input
+                          type="checkbox"
+                          checked={formData.requireLocationEvidence}
+                          onChange={(event) =>
+                            handleChange('requireLocationEvidence', event.target.checked)
+                          }
+                          style={{ width: 18, height: 18 }}
+                          disabled={isAdminEditDisabled}
+                        />
+                        <span>Exigir pelo menos uma evidência com localização</span>
+                      </label>
+                    </div>
+                  </div>
+                </section>
+              )}
 
               <div className="edit-task-actions">
                 <button

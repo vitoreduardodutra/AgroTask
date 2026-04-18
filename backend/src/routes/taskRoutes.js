@@ -5,6 +5,7 @@ const {
   createTask,
   getTaskById,
   updateTask,
+  reviewTaskCompletion,
   uploadTaskEvidence,
   deleteTaskEvidence,
   deleteTask,
@@ -20,6 +21,7 @@ router.get('/:id', authMiddleware, getTaskById);
 router.get('/', authMiddleware, listTasks);
 router.post('/', authMiddleware, requireAdmin, createTask);
 router.put('/:id', authMiddleware, updateTask);
+router.post('/:id/review-completion', authMiddleware, requireAdmin, reviewTaskCompletion);
 router.post(
   '/:id/evidences',
   authMiddleware,

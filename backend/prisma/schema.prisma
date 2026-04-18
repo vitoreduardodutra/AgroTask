@@ -40,42 +40,53 @@ enum TaskStatus {
   LATE
 }
 
+enum TaskCompletionReviewStatus {
+  NOT_REQUIRED
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum NotificationType {
   TASK_LATE
   TASK_DUE_TODAY
   TASK_DUE_TOMORROW
   TASK_ASSIGNED
+  TASK_COMPLETION_REVIEW_PENDING
+  TASK_COMPLETION_APPROVED
+  TASK_COMPLETION_REJECTED
 }
 
 model User {
-  id                     Int            @id @default(autoincrement())
+  id                     Int          @id @default(autoincrement())
   name                   String
-  email                  String         @unique
+  email                  String       @unique
   password               String?
-  googleId               String?        @unique
-  authProvider           AuthProvider   @default(LOCAL)
+  googleId               String?      @unique
+  authProvider           AuthProvider @default(LOCAL)
   avatarUrl              String?
-  status                 UserStatus     @default(ACTIVE)
+  status                 UserStatus   @default(ACTIVE)
   passwordResetToken     String?
   passwordResetExpiresAt DateTime?
-  createdAt              DateTime       @default(now())
-  updatedAt              DateTime       @updatedAt
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
 
-  memberships            FarmMember[]
-  tasks                  Task[]         @relation("TaskResponsible")
-  histories              History[]
-  notifications          Notification[]
+  memberships   FarmMember[]
+  tasks         Task[]         @relation("TaskResponsible")
+  reviewedTasks Task[]         @relation("TaskCompletionReviewedBy")
+  histories     History[]
+  notifications Notification[]
 
   @@map("users")
 }
 
 model Farm {
-  id            Int            @id @default(autoincrement())
-  name          String
-  segment       String
-  inviteCode    String         @unique
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id         Int      @id @default(autoincrement())
+  name       String
+  segment    String
+  inviteCode String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   members       FarmMember[]
   tasks         Task[]
@@ -91,32 +102,44 @@ model FarmMember {
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
-  userId    Int              @unique
-  farmId    Int
+  userId Int @unique
+  farmId Int
 
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  farm      Farm             @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  farm Farm @relation(fields: [farmId], references: [id], onDelete: Cascade)
 
   @@index([farmId])
   @@map("farm_members")
 }
 
 model Task {
-  id            Int            @id @default(autoincrement())
-  title         String
-  description   String
-  area          String?
-  priority      TaskPriority
-  deadline      DateTime
-  status        TaskStatus     @default(PENDING)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id          Int          @id @default(autoincrement())
+  title       String
+  description String
+  area        String?
+  priority    TaskPriority
+  deadline    DateTime
+  status      TaskStatus   @default(PENDING)
 
-  farmId        Int
-  farm          Farm           @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  completionRequiresApproval Boolean                    @default(false)
+  completionReviewStatus     TaskCompletionReviewStatus @default(NOT_REQUIRED)
+  completionReviewedAt       DateTime?
+  completionReviewedById     Int?
+  completionReviewedBy       User?                      @relation("TaskCompletionReviewedBy", fields: [completionReviewedById], references: [id], onDelete: SetNull)
+  completionRejectionReason  String?
+
+  requirePhotoEvidence    Boolean @default(false)
+  requireNoteEvidence     Boolean @default(false)
+  requireLocationEvidence Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  farmId Int
+  farm   Farm @relation(fields: [farmId], references: [id], onDelete: Cascade)
 
   responsibleId Int
-  responsible   User           @relation("TaskResponsible", fields: [responsibleId], references: [id])
+  responsible   User @relation("TaskResponsible", fields: [responsibleId], references: [id])
 
   evidences     Evidence[]
   histories     History[]
@@ -124,6 +147,7 @@ model Task {
 
   @@index([farmId])
   @@index([responsibleId])
+  @@index([completionReviewedById])
   @@map("tasks")
 }
 
@@ -137,8 +161,8 @@ model Evidence {
   longitude Float?
   createdAt DateTime @default(now())
 
-  taskId    Int
-  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId Int
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@map("evidences")
 }
@@ -148,11 +172,11 @@ model History {
   action    String
   createdAt DateTime @default(now())
 
-  taskId    Int
-  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId Int
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id])
+  userId Int
+  user   User @relation(fields: [userId], references: [id])
 
   @@map("histories")
 }
@@ -170,9 +194,9 @@ model Notification {
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  farm      Farm             @relation(fields: [farmId], references: [id], onDelete: Cascade)
-  task      Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  farm Farm @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@unique([userId, taskId, type])
   @@index([userId, farmId, isRead])
