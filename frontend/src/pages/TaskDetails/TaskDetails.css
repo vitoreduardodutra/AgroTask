@@ -368,6 +368,7 @@
   border: 1px solid #d8e0e8;
   background: #ffffff;
   color: #475467;
+  cursor: pointer;
 }
 
 .task-details-outline-button:hover {
@@ -393,6 +394,22 @@
   object-fit: contain;
   display: block;
   flex-shrink: 0;
+}
+
+.task-details-voice-button {
+  min-width: 160px;
+}
+
+.task-details-voice-button.is-speaking {
+  background: #ecfdf3;
+  border-color: #86efac;
+  color: #15803d;
+  box-shadow: 0 10px 24px rgba(34, 197, 94, 0.12);
+}
+
+.task-details-voice-button-icon {
+  font-size: 1rem;
+  line-height: 1;
 }
 
 .task-details-connection-banner {
@@ -921,44 +938,6 @@
   flex-shrink: 0;
 }
 
-.task-details-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.task-details-action-item {
-  min-height: 50px;
-  border-radius: 14px;
-  background: #f3f4f6;
-  color: #344054;
-  text-decoration: none;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 16px;
-  font-size: 1rem;
-  font-weight: 500;
-  transition: 0.2s;
-}
-
-.task-details-action-item:hover {
-  background: #eceff3;
-}
-
-.task-details-action-icon {
-  width: 18px;
-  height: 18px;
-  object-fit: contain;
-  display: block;
-  flex-shrink: 0;
-}
-
-.task-details-action-icon.dark {
-  filter: brightness(0) saturate(100%) invert(20%) sepia(13%) saturate(932%)
-    hue-rotate(183deg) brightness(93%) contrast(89%);
-}
-
 .task-details-id {
   margin-top: 12px;
   min-height: 58px;
@@ -1226,23 +1205,6 @@
   background: #f8fafc;
 }
 
-.task-details-validation-rule-icon-wrap {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
-  background: #ecfdf3;
-  color: #0f9d46;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.task-details-validation-rule-item.disabled .task-details-validation-rule-icon-wrap {
-  background: #f3f4f6;
-  color: #98a2b3;
-}
-
 .task-details-validation-rule-content {
   min-width: 0;
   display: flex;
@@ -1507,6 +1469,7 @@
   .task-details-toolbar-actions {
     width: 100%;
     gap: 10px;
+    flex-wrap: wrap;
   }
 
   .task-details-outline-button,
@@ -1568,7 +1531,6 @@
   .task-details-empty-evidence span,
   .task-details-add-link,
   .task-details-info-value,
-  .task-details-action-item,
   .task-details-id,
   .task-details-evidence-card span,
   .task-details-connection-text span,

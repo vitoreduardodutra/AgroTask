@@ -56,8 +56,11 @@ function TaskDetails() {
     getPendingTaskStatusCount()
   );
   const [syncingPendingQueue, setSyncingPendingQueue] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const [speakingTask, setSpeakingTask] = useState(false);
 
   const previousOnlineRef = useRef(getConnectivitySnapshot().isOnline);
+  const speechUtteranceRef = useRef(null);
 
   const isOffline = !connectivity.isOnline;
   const isCheckingConnection = connectivity.isChecking;
@@ -214,7 +217,6 @@ function TaskDetails() {
     return 'Ainda não existe uma revisão de conclusão em andamento para esta tarefa.';
   }, [task]);
 
-
   const visibleHistories = useMemo(() => {
     const histories = Array.isArray(task?.histories) ? task.histories : [];
 
@@ -230,6 +232,65 @@ function TaskDetails() {
     return totalHistories > 5;
   }, [task]);
 
+  const taskSpeechText = useMemo(() => {
+  if (!task) {
+    return '';
+  }
+
+  const speechParts = [];
+
+  speechParts.push(`Tarefa: ${task.title}.`);
+
+  if (task.description) {
+    speechParts.push(`Descrição: ${task.description}.`);
+  }
+
+  speechParts.push(`Status atual: ${task.status}.`);
+  speechParts.push(`Prioridade: ${task.priority}.`);
+  speechParts.push(
+    `Responsável: ${task.responsible?.name || 'Sem responsável definido'}.`
+  );
+  speechParts.push(
+    `Prazo: ${task.deadlineLong || task.deadline || 'Não informado'}.`
+  );
+  speechParts.push(`Área: ${task.area || 'Sem área informada'}.`);
+
+  const validationRules = [];
+
+  if (task.completionRequiresApproval) {
+    validationRules.push('aprovação do administrador');
+  }
+
+  if (task.requirePhotoEvidence) {
+    validationRules.push('envio de foto');
+  }
+
+  if (task.requireNoteEvidence) {
+    validationRules.push('observação obrigatória');
+  }
+
+  if (task.requireLocationEvidence) {
+    validationRules.push('captura de localização');
+  }
+
+  if (validationRules.length === 1) {
+    speechParts.push(
+      `Regra de validação: esta tarefa exige ${validationRules[0]}.`
+    );
+  }
+
+  if (validationRules.length > 1) {
+    const lastRule = validationRules[validationRules.length - 1];
+    const initialRules = validationRules.slice(0, -1).join(', ');
+
+    speechParts.push(
+      `Regras de validação: esta tarefa exige ${initialRules} e ${lastRule}.`
+    );
+  }
+
+  return speechParts.join(' ');
+}, [task]);
+
   const handleLogout = useCallback(() => {
     localStorage.removeItem('agrotask_token');
     localStorage.removeItem('agrotask_user');
@@ -237,6 +298,88 @@ function TaskDetails() {
     localStorage.removeItem('agrotask_membership');
     navigate('/', { replace: true });
   }, [navigate]);
+
+  const stopTaskSpeech = useCallback(() => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    speechUtteranceRef.current = null;
+    setSpeakingTask(false);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    setSpeechSupported(Boolean(window.speechSynthesis));
+
+    return () => {
+      stopTaskSpeech();
+    };
+  }, [stopTaskSpeech]);
+
+  const handleSpeakTask = () => {
+  if (!speechSupported || !taskSpeechText) {
+    setErrorMessage(
+      'A leitura por voz não está disponível neste navegador.'
+    );
+    return;
+  }
+
+  if (speakingTask) {
+    stopTaskSpeech();
+    return;
+  }
+
+  try {
+    const utterance = new SpeechSynthesisUtterance(taskSpeechText);
+    const availableVoices = window.speechSynthesis.getVoices();
+
+    const preferredVoice =
+      availableVoices.find((voice) => voice.lang?.toLowerCase().includes('pt-br')) ||
+      availableVoices.find((voice) => voice.lang?.toLowerCase().includes('pt')) ||
+      null;
+
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+
+    utterance.lang = preferredVoice?.lang || 'pt-BR';
+    utterance.rate = 0.92;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+
+    utterance.onstart = () => {
+      setSpeakingTask(true);
+      setErrorMessage('');
+    };
+
+    utterance.onend = () => {
+      setSpeakingTask(false);
+      speechUtteranceRef.current = null;
+    };
+
+    utterance.onerror = () => {
+      setSpeakingTask(false);
+      speechUtteranceRef.current = null;
+      setErrorMessage(
+        'Não foi possível reproduzir a leitura da tarefa neste momento.'
+      );
+    };
+
+    speechUtteranceRef.current = utterance;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  } catch (error) {
+    setErrorMessage(
+      'Não foi possível iniciar a leitura por voz agora.'
+    );
+    setSpeakingTask(false);
+  }
+  };
 
   const getPriorityIcon = (priorityValue) => {
     if (priorityValue === 'MEDIUM') {
@@ -630,6 +773,18 @@ function TaskDetails() {
             </Link>
 
             <div className="task-details-toolbar-actions">
+              <button
+                type="button"
+                className={`task-details-outline-button task-details-voice-button ${
+                  speakingTask ? 'is-speaking' : ''
+                }`}
+                onClick={handleSpeakTask}
+                disabled={!speechSupported || !task}
+              >
+                <span className="task-details-voice-button-icon">🔊</span>
+                <span>{speakingTask ? 'Parar leitura' : 'Ouvir tarefa'}</span>
+              </button>
+
               <Link to={`/evidences/${id}`} className="task-details-outline-button">
                 <img
                   src={evidencesIcon}

@@ -28,8 +28,13 @@ function Evidences() {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [previewEvidence, setPreviewEvidence] = useState(null);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceInterimText, setVoiceInterimText] = useState('');
 
   const submitFeedbackRef = useRef(null);
+  const speechRecognitionRef = useRef(null);
+  const speechRecognitionSupportedRef = useRef(false);
 
   const apiBaseUrl = useMemo(() => {
     return (api.defaults.baseURL || '').replace(/\/$/, '');
@@ -70,6 +75,150 @@ function Evidences() {
     }
 
     return Number(value).toFixed(6);
+  };
+
+  const stopVoiceRecognition = () => {
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.stop();
+      } catch (error) {
+        return;
+      }
+    }
+  };
+
+  const appendTranscriptToNote = (transcript) => {
+    const normalizedTranscript = String(transcript || '').trim();
+
+    if (!normalizedTranscript) {
+      return;
+    }
+
+    setNote((currentValue) => {
+      const baseText = String(currentValue || '').trim();
+
+      if (!baseText) {
+        return normalizedTranscript;
+      }
+
+      const needsSeparator = /[.!?…:]$/.test(baseText);
+      return `${baseText}${needsSeparator ? ' ' : '. '}${normalizedTranscript}`;
+    });
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setVoiceSupported(false);
+      speechRecognitionSupportedRef.current = false;
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'pt-BR';
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setVoiceListening(true);
+      setVoiceInterimText('');
+      setErrorMessage('');
+      setSuccessMessage('');
+    };
+
+    recognition.onresult = (event) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const transcript = event.results[index][0]?.transcript || '';
+
+        if (event.results[index].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      setVoiceInterimText(interimTranscript.trim());
+
+      if (finalTranscript.trim()) {
+        appendTranscriptToNote(finalTranscript);
+      }
+    };
+
+    recognition.onerror = (event) => {
+      const errorCode = event?.error;
+
+      if (errorCode === 'not-allowed' || errorCode === 'service-not-allowed') {
+        setErrorMessage(
+          'O acesso ao microfone foi bloqueado. Permita o uso do microfone no navegador para usar a transcrição por voz.'
+        );
+      } else if (errorCode === 'no-speech') {
+        setErrorMessage('Nenhuma fala foi detectada. Tente novamente.');
+      } else if (errorCode === 'audio-capture') {
+        setErrorMessage(
+          'Não foi possível acessar o microfone deste dispositivo.'
+        );
+      } else {
+        setErrorMessage(
+          'Não foi possível usar a transcrição por voz neste momento.'
+        );
+      }
+
+      setVoiceListening(false);
+      setVoiceInterimText('');
+    };
+
+    recognition.onend = () => {
+      setVoiceListening(false);
+      setVoiceInterimText('');
+    };
+
+    speechRecognitionRef.current = recognition;
+    speechRecognitionSupportedRef.current = true;
+    setVoiceSupported(true);
+
+    return () => {
+      try {
+        recognition.onstart = null;
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        recognition.stop();
+      } catch (error) {
+        return;
+      }
+    };
+  }, []);
+
+  const handleVoiceToggle = () => {
+    if (!speechRecognitionSupportedRef.current || !speechRecognitionRef.current) {
+      setErrorMessage(
+        'A transcrição por voz não é compatível com este navegador.'
+      );
+      return;
+    }
+
+    if (voiceListening) {
+      stopVoiceRecognition();
+      return;
+    }
+
+    try {
+      speechRecognitionRef.current.start();
+    } catch (error) {
+      setErrorMessage(
+        'Não foi possível iniciar a escuta por voz agora. Tente novamente.'
+      );
+    }
   };
 
   const loadTaskDetails = async () => {
@@ -128,6 +277,12 @@ function Evidences() {
       block: 'center',
     });
   }, [submissionContextualError]);
+
+  useEffect(() => {
+    return () => {
+      stopVoiceRecognition();
+    };
+  }, []);
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0] || null;
@@ -253,6 +408,7 @@ function Evidences() {
       );
       setSelectedFile(null);
       setNote('');
+      setVoiceInterimText('');
       setCapturedLocation({
         latitude: null,
         longitude: null,
@@ -493,6 +649,40 @@ function Evidences() {
                       </div>
 
                       <div className="evidences-field">
+                        <div className="evidences-voice-toolbar">
+                          <button
+                            type="button"
+                            className={`evidences-voice-button ${
+                              voiceListening ? 'listening' : ''
+                            }`}
+                            onClick={handleVoiceToggle}
+                            disabled={!voiceSupported}
+                            aria-label={
+                              voiceListening
+                                ? 'Parar transcrição por voz'
+                                : 'Iniciar transcrição por voz'
+                            }
+                            title={
+                              voiceSupported
+                                ? voiceListening
+                                  ? 'Parar transcrição por voz'
+                                  : 'Ditar observação'
+                                : 'Transcrição por voz não compatível neste navegador'
+                            }
+                          >
+                            <span className="evidences-voice-button-icon">🎤</span>
+                            <span className="evidences-voice-button-text">
+                              {voiceListening ? 'Ouvindo...' : 'Ditar observação'}
+                            </span>
+                          </button>
+
+                          {voiceInterimText && (
+                            <span className="evidences-voice-status">
+                              Transcrevendo: {voiceInterimText}
+                            </span>
+                          )}
+                        </div>
+
                         <textarea
                           id="observacao"
                           rows="4"
@@ -500,6 +690,18 @@ function Evidences() {
                           value={note}
                           onChange={(event) => setNote(event.target.value)}
                         />
+
+                        {voiceSupported && !voiceListening && (
+                          <span className="evidences-field-helper">
+                            Toque no microfone para falar e converter sua fala em texto.
+                          </span>
+                        )}
+
+                        {!voiceSupported && (
+                          <span className="evidences-field-helper">
+                            A transcrição por voz não está disponível neste navegador.
+                          </span>
+                        )}
                       </div>
                     </div>
 
