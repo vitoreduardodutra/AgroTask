@@ -373,10 +373,12 @@
   border-radius: 22px;
   overflow: hidden;
   margin-bottom: 26px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.03);
 }
 
 .new-task-card-header {
-  padding: 28px 30px 20px;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid #f1f4f8;
 }
 
 .new-task-card-header h3 {
@@ -384,14 +386,15 @@
   font-size: 0.95rem;
   font-weight: 800;
   letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: #344054;
 }
 
 .new-task-card-body {
-  padding: 0 30px 30px;
+  padding: 22px 24px 24px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
 }
 
 .new-task-card-body::before {
@@ -401,6 +404,10 @@
   height: 1px;
   background: #edf1f6;
   margin-bottom: 6px;
+}
+
+.new-task-card:last-of-type .new-task-card-body::before {
+  display: none;
 }
 
 .new-task-field {
@@ -606,6 +613,46 @@
   font-weight: 700;
 }
 
+.new-task-card:last-of-type .new-task-card-header {
+  background: linear-gradient(180deg, #fcfefd 0%, #f8fbf9 100%);
+}
+
+.new-task-card:last-of-type .new-task-card-header h3 {
+  color: #1f2937;
+}
+
+.new-task-card:last-of-type .new-task-card-body {
+  gap: 14px;
+}
+
+.new-task-card:last-of-type .new-task-field {
+  padding: 14px 16px;
+  border: 1px solid #e7edf4;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.new-task-card:last-of-type .new-task-field:hover {
+  border-color: #d9e4dc;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+  transform: translateY(-1px);
+}
+
+.new-task-card:last-of-type .new-task-field label,
+.new-task-card:last-of-type .new-task-section-label {
+  font-weight: 500;
+  color: #1f2937;
+}
+
+.new-task-card:last-of-type .new-task-field label span {
+  color: #475467;
+  line-height: 1.55;
+}
+
 .new-task-actions {
   display: flex;
   justify-content: flex-start;
@@ -749,12 +796,12 @@
   }
 
   .new-task-card-header {
-    padding: 22px 16px 16px;
+    padding: 18px 16px 14px;
   }
 
   .new-task-card-body {
-    padding: 0 16px 20px;
-    gap: 18px;
+    padding: 18px 16px 18px;
+    gap: 16px;
   }
 
   .new-task-field input,
@@ -781,5 +828,26 @@
   .new-task-save-button,
   .new-task-cancel-button {
     width: 100%;
+  }
+}
+
+@media (max-width: 420px) {
+  .new-task-content {
+    padding: 16px 14px 38px;
+  }
+
+  .new-task-shell {
+    padding-bottom: 26px;
+  }
+
+  .new-task-back-link {
+    font-size: 0.96rem;
+  }
+
+  .new-task-field input,
+  .new-task-field select,
+  .priority-option,
+  .status-option {
+    height: 46px;
   }
 }
