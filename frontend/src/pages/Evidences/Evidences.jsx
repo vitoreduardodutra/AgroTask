@@ -6,6 +6,7 @@ import uploadEvidenceIcon from '../../assets/icons/EnviarEvidência.svg';
 import confirmUploadIcon from '../../assets/icons/ConfirmarEnvio.svg';
 import evidencesIcon from '../../assets/icons/Evidências.svg';
 import deleteIcon from '../../assets/icons/Lixeira.svg';
+import ditarObservacaoIcon from '../../assets/icons/DitarObservação.svg';
 import AppShell from '../../components/AppShell/AppShell';
 import './Evidences.css';
 
@@ -670,7 +671,11 @@ function Evidences() {
                                 : 'Transcrição por voz não compatível neste navegador'
                             }
                           >
-                            <span className="evidences-voice-button-icon">🎤</span>
+                            <img
+                              src={ditarObservacaoIcon}
+                              alt=""
+                              className="evidences-voice-button-svg"
+                            />
                             <span className="evidences-voice-button-text">
                               {voiceListening ? 'Ouvindo...' : 'Ditar observação'}
                             </span>

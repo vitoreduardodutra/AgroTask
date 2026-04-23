@@ -19,7 +19,7 @@ import {
 } from '../../services/connectivityService';
 import newTaskIcon from '../../assets/icons/NovaTarefa.svg';
 import filtersIcon from '../../assets/icons/Filtros.svg';
-import tableSortIcon from '../../assets/icons/TRPSP.svg';
+import searchIcon from '../../assets/icons/Lupa.svg';
 import AppShell from '../../components/AppShell/AppShell';
 import './Tasks.css';
 
@@ -378,7 +378,7 @@ function Tasks() {
         <section className="tasks-filters-card">
           <div className="tasks-search-row">
             <div className="tasks-search-box">
-              <span className="tasks-search-icon">⌕</span>
+              <img src={searchIcon} alt="" className="tasks-search-icon-img" />
               <input
                 type="text"
                 placeholder="Buscar por título, responsável ou área..."
@@ -459,27 +459,22 @@ function Tasks() {
           >
             <div className="tasks-col title">
               <span>Título</span>
-              <img src={tableSortIcon} alt="" className="tasks-sort-icon" />
             </div>
 
             <div className="tasks-col responsible">
               <span>Responsável</span>
-              <img src={tableSortIcon} alt="" className="tasks-sort-icon" />
             </div>
 
             <div className="tasks-col priority">
               <span>Prioridade</span>
-              <img src={tableSortIcon} alt="" className="tasks-sort-icon" />
             </div>
 
             <div className="tasks-col status">
               <span>Status</span>
-              <img src={tableSortIcon} alt="" className="tasks-sort-icon" />
             </div>
 
             <div className="tasks-col deadline">
               <span>Prazo</span>
-              <img src={tableSortIcon} alt="" className="tasks-sort-icon" />
             </div>
 
             {isAdmin && (
