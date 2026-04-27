@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import backIcon from '../../assets/icons/Voltar.svg';
-import createTaskIcon from '../../assets/icons/CriarTarefa.svg';
+import createTaskIcon from '../../assets/icons/Criar-Tarefa.svg';
 import AppShell from '../../components/AppShell/AppShell';
 import './NewTask.css';
 

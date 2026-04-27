@@ -2,6 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import logoAgroTask from '../../assets/icons/LogoAgroTask.svg';
 import dashboardIcon from '../../assets/icons/Dashboard.svg';
 import tasksIcon from '../../assets/icons/Tarefas.svg';
+import minhaFazendaIcon from '../../assets/icons/MinhaFazenda.svg';
 import './AppSidebar.css';
 
 function AppSidebar({ isOpen = false, onClose = () => {} }) {
@@ -91,12 +92,12 @@ function AppSidebar({ isOpen = false, onClose = () => {} }) {
               }`}
               onClick={handleNavigateAndClose}
             >
-              <span className="app-sidebar-menu-icon app-sidebar-menu-icon-svg">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M3 20h18" />
-                  <path d="M5 20V10l7-5 7 5v10" />
-                  <path d="M9 20v-5h6v5" />
-                </svg>
+              <span className="app-sidebar-menu-icon">
+                <img
+                  src={minhaFazendaIcon}
+                  alt=""
+                  className="app-sidebar-menu-icon-img"
+                />
               </span>
               <span>Minha Fazenda</span>
               {location.pathname === '/farm' && (
