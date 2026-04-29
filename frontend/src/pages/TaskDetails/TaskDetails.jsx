@@ -1212,7 +1212,11 @@ function TaskDetails() {
                 </div>
 
                 {task.evidences.length === 0 ? (
-                  <div className="task-details-empty-evidence">
+                  <Link
+                    to={`/evidences/${id}`}
+                    className="task-details-empty-evidence"
+                    aria-label="Adicionar evidência para esta tarefa"
+                  >
                     <img
                       src={evidencesIcon}
                       alt=""
@@ -1220,7 +1224,7 @@ function TaskDetails() {
                     />
                     <p>Nenhuma evidência enviada</p>
                     <span>Clique para adicionar</span>
-                  </div>
+                  </Link>
                 ) : (
                   <div className="task-details-evidence-grid">
                     {task.evidences.map((evidence) => (
