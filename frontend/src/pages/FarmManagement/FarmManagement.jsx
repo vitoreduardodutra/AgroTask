@@ -95,12 +95,6 @@ function FarmManagement() {
     <AppShell title="Minha Fazenda" pageClassName="farm-page">
       <div className="farm-shell">
         <div className="farm-container">
-          <Link to="/dashboard" className="farm-back">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="m15 18-6-6 6-6" />
-            </svg>
-            <span>Voltar para dashboard</span>
-          </Link>
 
           <div className="farm-page-header">
             <h2>Minha fazenda</h2>
