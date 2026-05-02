@@ -1,6 +1,13 @@
 const jwt = require('jsonwebtoken');
 const prisma = require('../config/prisma');
 
+function getDecodedUserId(decodedToken) {
+  const possibleIds = [decodedToken?.id, decodedToken?.sub];
+  const validId = possibleIds.find((value) => Number.isInteger(Number(value)));
+
+  return validId ? Number(validId) : null;
+}
+
 async function authMiddleware(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
@@ -20,10 +27,17 @@ async function authMiddleware(req, res, next) {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = getDecodedUserId(decoded);
+
+    if (!userId) {
+      return res.status(401).json({
+        message: 'Token invalido.',
+      });
+    }
 
     const user = await prisma.user.findUnique({
       where: {
-        id: Number(decoded.sub),
+        id: userId,
       },
       select: {
         id: true,

@@ -53,6 +53,15 @@ function AppHeader({
   };
 
   const loadNotifications = async () => {
+    const token = localStorage.getItem('agrotask_token');
+
+    if (!token) {
+      setNotifications([]);
+      setUnreadCount(0);
+      setIsLoadingNotifications(false);
+      return;
+    }
+
     try {
       setIsLoadingNotifications(true);
 
@@ -61,13 +70,6 @@ function AppHeader({
       setNotifications(response.data?.notifications || []);
       setUnreadCount(response.data?.unreadCount || 0);
     } catch (error) {
-      const status = error.response?.status;
-
-      if (status === 401 || status === 403) {
-        handleLogout();
-        return;
-      }
-
       setNotifications([]);
       setUnreadCount(0);
     } finally {
