@@ -13,6 +13,7 @@ import RegisterChoice from '../pages/RegisterChoice/RegisterChoice';
 import RegisterAdmin from '../pages/RegisterAdmin/RegisterAdmin';
 import RegisterEmployee from '../pages/RegisterEmployee/RegisterEmployee';
 import FarmManagement from '../pages/FarmManagement/FarmManagement';
+import Reports from '../pages/Reports/Reports';
 
 function getStoredAuth() {
   const token = localStorage.getItem('agrotask_token');
@@ -147,6 +148,14 @@ function AppRoutes() {
           element={
             <AdminRoute>
               <FarmManagement />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/reports"
+          element={
+            <AdminRoute>
+              <Reports />
             </AdminRoute>
           }
         />

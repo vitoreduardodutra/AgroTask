@@ -718,7 +718,7 @@ async function registerEmployeeWithGoogle(req, res) {
 async function login(req, res) {
   try {
     const email = normalizeEmail(req.body.email);
-    const senha = normalizeText(req.body.senha);
+    const senha = normalizeText(req.body.senha || req.body.password);
 
     if (!email || !senha) {
       return res.status(400).json({
