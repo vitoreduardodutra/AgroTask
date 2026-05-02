@@ -4,6 +4,7 @@ const dashboardRoutes = require('./dashboardRoutes');
 const taskRoutes = require('./taskRoutes');
 const farmRoutes = require('./farmRoutes');
 const notificationRoutes = require('./notificationRoutes');
+const reportRoutes = require('./reportRoutes');
 
 const router = express.Router();
 
@@ -18,5 +19,6 @@ router.use('/dashboard', dashboardRoutes);
 router.use('/tasks', taskRoutes);
 router.use('/farms', farmRoutes);
 router.use('/notifications', notificationRoutes);
+router.use('/reports', reportRoutes);
 
 module.exports = router;

@@ -1,13 +1,13 @@
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import logoAgroTask from '../../assets/icons/LogoAgroTask.svg';
 import dashboardIcon from '../../assets/icons/Dashboard.svg';
 import tasksIcon from '../../assets/icons/Tarefas.svg';
 import minhaFazendaIcon from '../../assets/icons/MinhaFazenda.svg';
+import reportsIcon from '../../assets/icons/Relatórios.svg';
 import './AppSidebar.css';
 
 function AppSidebar({ isOpen = false, onClose = () => {} }) {
   const location = useLocation();
-  const navigate = useNavigate();
 
   const storedMembership = JSON.parse(
     localStorage.getItem('agrotask_membership') || '{}'
@@ -27,6 +27,7 @@ function AppSidebar({ isOpen = false, onClose = () => {} }) {
     location.pathname.startsWith('/task-details/') ||
     location.pathname.startsWith('/edit-task/') ||
     location.pathname.startsWith('/evidences/');
+  const isReportsSectionActive = location.pathname === '/reports';
 
   return (
     <aside className={`app-sidebar ${isOpen ? 'app-sidebar--open' : ''}`}>
@@ -38,7 +39,7 @@ function AppSidebar({ isOpen = false, onClose = () => {} }) {
 
           <div className="app-sidebar-brand-text">
             <strong>AgroTask</strong>
-            <span>Gestão Agrícola</span>
+            <span>Gestao Agricola</span>
           </div>
 
           <button
@@ -47,7 +48,7 @@ function AppSidebar({ isOpen = false, onClose = () => {} }) {
             onClick={onClose}
             aria-label="Fechar menu lateral"
           >
-            ×
+            x
           </button>
         </div>
 
@@ -66,7 +67,7 @@ function AppSidebar({ isOpen = false, onClose = () => {} }) {
             </span>
             <span>Dashboard</span>
             {location.pathname === '/dashboard' && (
-              <span className="app-sidebar-menu-arrow">›</span>
+              <span className="app-sidebar-menu-arrow">&gt;</span>
             )}
           </Link>
 
@@ -80,9 +81,31 @@ function AppSidebar({ isOpen = false, onClose = () => {} }) {
             </span>
             <span>Tarefas</span>
             {isTasksSectionActive && (
-              <span className="app-sidebar-menu-arrow">›</span>
+              <span className="app-sidebar-menu-arrow">&gt;</span>
             )}
           </Link>
+
+          {isAdmin && (
+            <Link
+              to="/reports"
+              className={`app-sidebar-menu-item ${
+                isReportsSectionActive ? 'active' : ''
+              }`}
+              onClick={handleNavigateAndClose}
+            >
+              <span className="app-sidebar-menu-icon">
+                <img
+                  src={reportsIcon}
+                  alt=""
+                  className="app-sidebar-menu-icon-img"
+                />
+              </span>
+              <span>Relatorios</span>
+              {isReportsSectionActive && (
+                <span className="app-sidebar-menu-arrow">&gt;</span>
+              )}
+            </Link>
+          )}
 
           {isAdmin && (
             <Link
@@ -101,7 +124,7 @@ function AppSidebar({ isOpen = false, onClose = () => {} }) {
               </span>
               <span>Minha Fazenda</span>
               {location.pathname === '/farm' && (
-                <span className="app-sidebar-menu-arrow">›</span>
+                <span className="app-sidebar-menu-arrow">&gt;</span>
               )}
             </Link>
           )}
