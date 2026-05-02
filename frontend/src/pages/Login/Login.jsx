@@ -4,33 +4,29 @@ import logoAgroTask from '../../assets/icons/LogoAgroTask.svg';
 import api from '../../services/api';
 import './Login.css';
 
+const GOOGLE_SCRIPT_SELECTOR = 'script[src="https://accounts.google.com/gsi/client"]';
+
 function Login() {
   const navigate = useNavigate();
   const googleButtonRef = useRef(null);
+  const googleInitializedRef = useRef(false);
+  const googleRetryTimeoutRef = useRef(null);
 
-  const [formData, setFormData] = useState({
-    email: '',
-    senha: '',
+  const [submittingLocalLogin, setSubmittingLocalLogin] = useState(false);
+  const [submittingGoogleLogin, setSubmittingGoogleLogin] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [googleButtonStatus, setGoogleButtonStatus] = useState(() => {
+    return import.meta.env.VITE_GOOGLE_CLIENT_ID ? 'loading' : 'unavailable';
   });
 
-  const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
-
-  const handleChange = (event) => {
-    const { name, value } = event.target;
-
-    setFormData((prevState) => ({
-      ...prevState,
-      [name]: value,
-    }));
-
-    if (errorMessage) {
-      setErrorMessage('');
-    }
-  };
+  const isSubmitting = submittingLocalLogin || submittingGoogleLogin;
 
   const saveAuthData = (data) => {
-    const { token, user, farm, membership } = data;
+    const { token, user, farm, membership } = data || {};
+
+    if (!token || !user || !farm || !membership) {
+      throw new Error('Resposta de autenticacao incompleta.');
+    }
 
     localStorage.setItem('agrotask_token', token);
     localStorage.setItem('agrotask_user', JSON.stringify(user));
@@ -38,80 +34,152 @@ function Login() {
     localStorage.setItem('agrotask_membership', JSON.stringify(membership));
   };
 
+  const clearGoogleRetryTimeout = () => {
+    if (googleRetryTimeoutRef.current) {
+      window.clearTimeout(googleRetryTimeoutRef.current);
+      googleRetryTimeoutRef.current = null;
+    }
+  };
+
+  const scheduleGoogleInitializationRetry = (initializeGoogleButton) => {
+    clearGoogleRetryTimeout();
+    googleRetryTimeoutRef.current = window.setTimeout(() => {
+      initializeGoogleButton();
+    }, 250);
+  };
+
+  const handleSuccessfulLogin = (data) => {
+    saveAuthData(data);
+    navigate('/dashboard', { replace: true });
+  };
+
   const handleGoogleLogin = async (response) => {
-    if (loading) {
+    if (submittingGoogleLogin || submittingLocalLogin) {
       return;
     }
 
     try {
-      setLoading(true);
+      setSubmittingGoogleLogin(true);
       setErrorMessage('');
 
       const apiResponse = await api.post('/auth/google/login', {
         credential: response.credential,
       });
 
-      saveAuthData(apiResponse.data);
-      navigate('/dashboard');
+      handleSuccessfulLogin(apiResponse.data);
     } catch (error) {
       const message =
         error.response?.data?.message ||
-        'Não foi possível entrar com Google. Tente novamente.';
+        'Nao foi possivel entrar com Google. Tente novamente.';
 
       setErrorMessage(message);
     } finally {
-      setLoading(false);
+      setSubmittingGoogleLogin(false);
     }
   };
 
   useEffect(() => {
-    if (!window.google || !googleButtonRef.current || !import.meta.env.VITE_GOOGLE_CLIENT_ID) {
-      return;
+    if (!import.meta.env.VITE_GOOGLE_CLIENT_ID) {
+      setGoogleButtonStatus('unavailable');
+      return undefined;
     }
 
-    window.google.accounts.id.initialize({
-      client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-      callback: handleGoogleLogin,
-    });
+    const initializeGoogleButton = () => {
+      const googleAccounts = window.google?.accounts?.id;
 
-    googleButtonRef.current.innerHTML = '';
+      if (!googleButtonRef.current) {
+        return;
+      }
 
-    window.google.accounts.id.renderButton(googleButtonRef.current, {
-      theme: 'outline',
-      size: 'large',
-      width: '452',
-      text: 'signin_with',
-      shape: 'pill',
-    });
+      if (!googleAccounts) {
+        setGoogleButtonStatus('loading');
+        scheduleGoogleInitializationRetry(initializeGoogleButton);
+        return;
+      }
+
+      if (!googleInitializedRef.current) {
+        googleAccounts.initialize({
+          client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+          callback: (response) => {
+            handleGoogleLogin(response);
+          },
+        });
+        googleInitializedRef.current = true;
+      }
+
+      googleButtonRef.current.innerHTML = '';
+
+      googleAccounts.renderButton(googleButtonRef.current, {
+        theme: 'outline',
+        size: 'large',
+        width: '452',
+        text: 'signin_with',
+        shape: 'pill',
+      });
+
+      setGoogleButtonStatus('ready');
+      clearGoogleRetryTimeout();
+    };
+
+    const googleScript = document.querySelector(GOOGLE_SCRIPT_SELECTOR);
+    const handleScriptLoad = () => {
+      initializeGoogleButton();
+    };
+
+    initializeGoogleButton();
+
+    googleScript?.addEventListener('load', handleScriptLoad);
+
+    return () => {
+      googleScript?.removeEventListener('load', handleScriptLoad);
+      clearGoogleRetryTimeout();
+    };
   }, []);
+
+  const handleFieldInteraction = () => {
+    if (errorMessage) {
+      setErrorMessage('');
+    }
+  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    if (loading) {
+    if (submittingLocalLogin || submittingGoogleLogin) {
+      return;
+    }
+
+    const submittedFormData = new FormData(event.currentTarget);
+    const submittedEmail = String(
+      submittedFormData.get('email') || ''
+    ).trim();
+    const submittedPassword = String(
+      submittedFormData.get('senha') || ''
+    );
+
+    if (!submittedEmail || !submittedPassword) {
+      setErrorMessage('Email e senha sao obrigatorios.');
       return;
     }
 
     try {
-      setLoading(true);
+      setSubmittingLocalLogin(true);
       setErrorMessage('');
 
       const response = await api.post('/auth/login', {
-        email: formData.email,
-        senha: formData.senha,
+        email: submittedEmail,
+        senha: submittedPassword,
       });
 
-      saveAuthData(response.data);
-
-      navigate('/dashboard');
+      handleSuccessfulLogin(response.data);
     } catch (error) {
       const message =
         error.response?.data?.message ||
-        'Não foi possível entrar. Verifique suas credenciais e tente novamente.';
+        'Nao foi possivel entrar. Verifique suas credenciais e tente novamente.';
 
       setErrorMessage(message);
     } finally {
-      setLoading(false);
+      setSubmittingLocalLogin(false);
     }
   };
 
@@ -129,32 +197,32 @@ function Login() {
           <h1>Organize melhor a rotina da sua fazenda.</h1>
 
           <p>
-            Centralize tarefas, responsáveis, prazos, evidências e histórico em
-            um único ambiente, mantendo a operação mais organizada no dia a dia.
+            Centralize tarefas, responsaveis, prazos, evidencias e historico em
+            um unico ambiente, mantendo a operacao mais organizada no dia a dia.
           </p>
 
           <div className="login-highlight-card">
-            <span className="login-highlight-label">No AgroTask você acompanha</span>
+            <span className="login-highlight-label">No AgroTask voce acompanha</span>
 
             <div className="login-highlight-grid">
               <div className="login-highlight-item">
                 <strong>Tarefas</strong>
-                <span>Criação, andamento e conclusão das atividades</span>
+                <span>Criacao, andamento e conclusao das atividades</span>
               </div>
 
               <div className="login-highlight-item">
-                <strong>Responsáveis</strong>
-                <span>Distribuição clara do que cada pessoa deve executar</span>
+                <strong>Responsaveis</strong>
+                <span>Distribuicao clara do que cada pessoa deve executar</span>
               </div>
 
               <div className="login-highlight-item">
-                <strong>Evidências</strong>
-                <span>Registro da execução com mais rastreabilidade</span>
+                <strong>Evidencias</strong>
+                <span>Registro da execucao com mais rastreabilidade</span>
               </div>
 
               <div className="login-highlight-item">
                 <strong>Dashboard</strong>
-                <span>Visão rápida da operação e do progresso da equipe</span>
+                <span>Visao rapida da operacao e do progresso da equipe</span>
               </div>
             </div>
           </div>
@@ -180,11 +248,11 @@ function Login() {
                 name="email"
                 type="email"
                 placeholder="seu@email.com.br"
-                value={formData.email}
-                onChange={handleChange}
                 autoComplete="email"
                 required
-                disabled={loading}
+                disabled={isSubmitting}
+                onChange={handleFieldInteraction}
+                onInput={handleFieldInteraction}
               />
             </div>
 
@@ -195,11 +263,11 @@ function Login() {
                 name="senha"
                 type="password"
                 placeholder="••••••••"
-                value={formData.senha}
-                onChange={handleChange}
                 autoComplete="current-password"
                 required
-                disabled={loading}
+                disabled={isSubmitting}
+                onChange={handleFieldInteraction}
+                onInput={handleFieldInteraction}
               />
             </div>
 
@@ -214,9 +282,9 @@ function Login() {
             <button
               type="submit"
               className="login-submit-button"
-              disabled={loading}
+              disabled={isSubmitting}
             >
-              {loading ? 'Entrando...' : 'Entrar'}
+              {submittingLocalLogin ? 'Entrando...' : 'Entrar'}
             </button>
           </form>
 
@@ -225,13 +293,30 @@ function Login() {
           </div>
 
           <div className="login-google-wrapper">
-            <div ref={googleButtonRef} />
+            <div
+              ref={googleButtonRef}
+              className={`login-google-slot ${
+                googleButtonStatus === 'ready' ? 'is-ready' : ''
+              }`}
+            />
+
+            {googleButtonStatus === 'loading' && (
+              <div className="login-google-loading">
+                Carregando acesso com Google...
+              </div>
+            )}
+
+            {googleButtonStatus === 'unavailable' && (
+              <div className="login-google-unavailable">
+                Login com Google indisponivel nesta configuracao.
+              </div>
+            )}
           </div>
 
           <div className="login-divider" />
 
           <p className="login-register-link">
-            Não tem uma conta? <Link to="/register">Criar conta</Link>
+            Nao tem uma conta? <Link to="/register">Criar conta</Link>
           </p>
         </div>
       </div>
